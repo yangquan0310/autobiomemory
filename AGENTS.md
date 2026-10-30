@@ -74,7 +74,7 @@ scripts/pack-dist.mjs 打包到 dist/
   logs/                预留
 ```
 
-原始会话**留在原地**（默认 `~/.dsh/sessions/**/session.jsonl.zstd`），只增量读取，不移动、不改写。
+原始会话**留在原地**（默认 `~/.dsh/sessions/**/session*.jsonl.zstd`），只增量读取，不移动、不改写。
 
 ## 开发流程（分支）
 

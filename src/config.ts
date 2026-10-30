@@ -19,7 +19,10 @@ export function defaultConfig(dataRoot?: string): MemoryConfig {
     dataRoot: dataRoot ?? '',
     session: {
       readDirs: ['~/.dsh/sessions'],
-      includeGlobs: ['**/session.jsonl.zstd', '**/session.jsonl'],
+      // dsh names transcripts with a session-format version (`session.v4.jsonl.zstd`
+      // on 0.2.x). Keep the glob version-agnostic so a dsh upgrade cannot silently
+      // hide every transcript from consolidation.
+      includeGlobs: ['**/session*.jsonl.zstd', '**/session*.jsonl'],
       excludeGlobs: [],
       minRecordsPerEvent: 2,
       maxRecordsPerEvent: 200,
