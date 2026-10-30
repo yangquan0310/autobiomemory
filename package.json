@@ -36,7 +36,8 @@
     "test": "vitest run",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build",
     "cli": "node dist/cli.js",
-    "pack:dist": "node scripts/pack-dist.mjs"
+    "pack:dist": "node scripts/pack-dist.mjs",
+    "prepare": "pnpm run build"
   },
   "keywords": [
     "deepseek",
