@@ -104,7 +104,12 @@ export {
 
 export { matchFilters, parseFilterArguments, recall, renderRecallText } from './retrieval.js'
 
-export { consolidate, consolidateOnce, isConsolidating } from './consolidate.js'
+export {
+  consolidate,
+  consolidateOnce,
+  isConsolidating,
+  retrySkippedSpans,
+} from './consolidate.js'
 export type { ConsolidateDeps } from './consolidate.js'
 
 export { createLogger, silentLogger } from './logger.js'

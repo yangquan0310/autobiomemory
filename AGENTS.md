@@ -96,7 +96,7 @@ git checkout alpha && git merge --no-ff feat/core feat/session ...
 git checkout beta && pnpm run check && pnpm run build && pnpm run pack:dist
 
 # 从 dist 安装插件
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 ```
 
 安装后**必须重启 profile 进程**（`dsh web`）才会加载新的 bundle 层。
@@ -126,3 +126,4 @@ node dist/cli.js recall "上次部署是怎么做的"
    改用 `createRequire(import.meta.url)('node:sqlite')` 运行时解析，且 `tsup` 里不要再加 shebang banner
    （`src/cli.ts` 自带，重复会 SyntaxError）。
 8. **dry-run 不许留痕**：`consolidate --dry-run` 不写 run state、不写游标、不写 spans，只报告。
+9. **毒片段**：游标"失败不前进"是对的，但必须有 `maxSpanAttempts` 兜底——否则一个永远编码不出的片段会把整个会话卡在退避里。放弃时要**同时**清 spans 记忆并回卷游标，否则 `--retry-skipped` 也救不回来（`retrySkippedSpans()` 已按此实现）。

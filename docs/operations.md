@@ -9,7 +9,7 @@
 dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
 
 # B) 从本地产物装（离线 / 私有仓库；先 pnpm run build && pnpm run pack:dist）
-dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 
 # 初始化数据根目录（会自动从 ~/.dsh/.env 导入 DeepSeek / DashScope 密钥）
 autobiomemory init
@@ -63,6 +63,12 @@ autobiomemory config            # 打印当前有效配置
 | `consolidation.maxEventsPerRun` | `12` | 单轮整理最多产出多少事件（控成本） |
 | `consolidation.recentEventLimit` | `20` | 短时记忆窗口（多少条最近日记常驻提示词） |
 | `consolidation.cooldownMs` | `60000` | 自动整理冷却时间 |
+| `consolidation.serialize` | `true` | 同一进程内是否串行（false 时允许并发，靠片段去重兜底） |
+| `consolidation.maxSpanAttempts` | `3` | 同一片段连续失败多少次后放弃并跳过（防止毒片段卡死会话） |
+| `trigger.globalCooldownMs` | `120000` | 全局触发冷却；与 `consolidation.cooldownMs` 取**较大值** |
+| `trigger.onCompaction` | `true` | 是否注册 `agent/pre-step` 前置触发 |
+| `trigger.onTurnEnd` | `false` | 回合结束（agent 空闲）时是否补整理 |
+| `trigger.onSessionStart` | `false` | 新会话出现时是否补整理 |
 | `deepseek.model` | `deepseek-chat` | 编码模型 |
 | `deepseek.baseUrl` | `https://api.deepseek.com` | API 地址 |
 | `deepseek.jsonMode` | `true` | 用 JSON 模式约束响应 |
@@ -91,6 +97,7 @@ autobiomemory status                    # 事件数、向量数、游标、失�
 autobiomemory consolidate --force       # 立刻整理一轮（跳过冷却）
 autobiomemory consolidate --dry-run     # 只报告会写什么，不落盘
 autobiomemory consolidate --session /path/to/session.jsonl.zstd
+autobiomemory consolidate --retry-skipped           # 重试"已放弃片段"（会回卷游标）
 autobiomemory recall "上次部署是怎么做的" --since 2025-10-01 --status completed
 autobiomemory recall "…" --json         # 机器可读
 autobiomemory short-term --limit 5      # 打印短时记忆摘要
@@ -124,6 +131,7 @@ DeepSeek 连通性、DashScope embedding/rerank、向量索引、JSON/MD 配对�
 | 召回结果为空 | 事件太少或向量未建 | `status` 确认向量数；`short-term` 看是否有日记 |
 | 配对异常 `missing-md` | JSON 写了 MD 没写（中断） | `autobiomemory repair` |
 | 日记与向量不一致 | 日记被改写但向量未刷新 | 下一轮整理会自动重建；也可 `embed --force` |
+| 某会话一直整理不动 | 某片段反复编码失败（毒片段） | 0.1.1 起会自动放弃并跳过（`maxSpanAttempts`）；`status` 看「已放弃片段」，`consolidate --retry-skipped` 重试 |
 | 插件没生效 | bundle 层未加载 | 重启 profile；`dsh --profile web --dump-config \| grep autobiomemory` |
 | 工具名冲突 | 其他插件也注册同名工具 | `config --set` 改 `toolName`/`consolidateToolName` |
 

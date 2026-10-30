@@ -473,14 +473,16 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
 
   // The harness's real pre-compaction seam: `compaction-basic` runs `compactIfNeeded()` from its
   // own `agent/pre-step` listener, so a prepended listener observes the moment before it decides.
-  ctx.on(
-    'agent/pre-step',
-    async ({ agent }, next) => {
-      await runConsolidation(agent, 'pre-step')
-      return next()
-    },
-    { prepend: true },
-  )
+  if (config.trigger.onCompaction !== false) {
+    ctx.on(
+      'agent/pre-step',
+      async ({ agent }, next) => {
+        await runConsolidation(agent, 'pre-step')
+        return next()
+      },
+      { prepend: true },
+    )
+  }
 
   // Belt and braces: `compaction/start` is a durable session event written before summarization.
   ctx.on('session/event', (session, event) => {
@@ -491,13 +493,17 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
     void runConsolidation(agent, 'compaction/start')
   })
 
-  if (pluginConfig.consolidateOnIdle === true) {
-    ctx.on(
-      'agent/status',
-      ({ agent, status }: { agent: unknown; status?: string }) => {
-        if (status === 'idle') void runConsolidation(agent, 'idle')
-      },
-    )
+  if (pluginConfig.consolidateOnIdle === true || config.trigger.onTurnEnd === true) {
+    ctx.on('agent/status', ({ agent, status }: { agent: unknown; status?: string }) => {
+      if (status === 'idle') void runConsolidation(agent, 'idle')
+    })
+  }
+
+  // Catch up once when a session appears (a fresh session file usually means a fresh transcript).
+  if (config.trigger.onSessionStart === true) {
+    ctx.on('agent/created', ({ agent }: { agent: unknown }) => {
+      void runConsolidation(agent, 'session-start')
+    })
   }
 
   // Warm the index metadata once so the first recall is fast (and so a broken data root is

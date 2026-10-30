@@ -18,7 +18,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { defaultConfig, ensureConfig, expandSessionDirs, loadConfig, writeConfig } from './config.js'
-import { consolidate } from './consolidate.js'
+import { consolidate, retrySkippedSpans } from './consolidate.js'
 import { createEmbedder, createReranker, embedOne } from './embed.js'
 import { parseDotEnv, readSecrets, requireSecret, writeEnvFile } from './env.js'
 import { createLogger } from './logger.js'
@@ -104,7 +104,7 @@ function printHelp(): void {
   init        初始化数据根目录（config.json / .env / events / vectors / state）
   config      查看或修改 config.json（--set key=value，可重复；--json）
   status      查看游标、事件数、向量数、失败队列
-  consolidate 执行一次增量整理（--force --dry-run --session <file>）
+  consolidate 执行一次增量整理（--force --dry-run --session <file> --retry-skipped）
   recall <q>  回忆（--since --until --tag --status --limit --json）
   embed       回填或刷新向量索引（--stale --missing --force）
   repair      修复 JSON/MD 配对（--dry-run）
@@ -279,6 +279,7 @@ async function main(): Promise<number> {
         lastRunAt: run.lastRunAt ?? null,
         totals: run.totals,
         failures: Object.values(run.failures),
+        skipped: Object.values(run.skipped ?? {}),
         config: {
           sessions: expandSessionDirs(config, process.cwd()),
           deepseek: { model: config.deepseek.model, baseUrl: config.deepseek.baseUrl },
@@ -306,6 +307,9 @@ async function main(): Promise<number> {
           payload.failures.length > 0
             ? `失败队列     ：${payload.failures.length} 条（下次重试最早 ${payload.failures[0]?.nextAttemptAt}）`
             : '失败队列     ：空',
+          payload.skipped.length > 0
+            ? `已放弃片段   ：${payload.skipped.length} 条（consolidate --retry-skipped 可重试）`
+            : '已放弃片段   ：无',
           '',
           ...payload.sessions.map(
             (session) =>
@@ -321,6 +325,11 @@ async function main(): Promise<number> {
       const config = ensureConfig(paths)
       const secrets = readSecrets(paths)
       const dryRun = flagBool(args, 'dry-run')
+      if (flagBool(args, 'retry-skipped')) {
+        const session = flagString(args, 'session')
+        const cleared = retrySkippedSpans(paths, session === undefined ? undefined : session)
+        process.stdout.write(`已清除 ${cleared} 条"放弃片段"记录，下一次整理会重试它们。\n`)
+      }
       const result = await consolidate({
         paths,
         config,

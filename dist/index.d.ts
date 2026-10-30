@@ -109,6 +109,11 @@ interface ConsolidationConfig {
     cooldownMs: number;
     /** Whether a run may proceed while another is in flight in this process. */
     serialize: boolean;
+    /**
+     * How many encode attempts one span gets before it is marked skipped and the cursor
+     * moves past it. Keeps a poison span from stalling a session forever.
+     */
+    maxSpanAttempts: number;
 }
 interface DeepseekConfig {
     baseUrl: string;
@@ -380,11 +385,23 @@ interface FailureEntry {
     lastAttemptAt: string;
     nextAttemptAt: string;
 }
+/** A span that repeatedly failed to encode and was deliberately stepped over. */
+interface SkippedSpan {
+    sessionFile: string;
+    spanHash: string;
+    fromSeq: number;
+    toSeq: number;
+    attempts: number;
+    reason: string;
+    skippedAt: string;
+}
 interface RunState {
     version: number;
     lastRunAt?: string;
     lastRunResult?: ConsolidationResult;
     failures: Record<string, FailureEntry>;
+    /** Spans given up on, keyed by `<sessionFile>#<spanHash>`. */
+    skipped?: Record<string, SkippedSpan>;
     totals: {
         events: number;
         embedded: number;
@@ -1105,6 +1122,8 @@ interface ConsolidateDeps {
 declare function consolidate(input: ConsolidateDeps): Promise<ConsolidationResult>;
 declare function consolidateOnce(input: ConsolidateDeps): Promise<ConsolidationResult>;
 declare function isConsolidating(): boolean;
+/** Forget skipped spans so they are attempted again (`consolidate --retry-skipped`). */
+declare function retrySkippedSpans(paths: Parameters<typeof loadRunState>[0], sessionFile?: string): number;
 
 /** AutoBioMemory — minimal leveled logger (never logs secrets). */
 
@@ -1119,4 +1138,4 @@ interface LoggerOptions {
 declare function createLogger(options?: LoggerOptions): Logger;
 declare function silentLogger(): Logger;
 
-export { Config, type ConsolidateDeps, type ConsolidationConfig, type ConsolidationResult, type CursorState, DIRS, type DashscopeConfig, DashscopeError, DeepseekClient, type DeepseekConfig, DeepseekError, type Distiller, ENCODING_GUIDE, type Embedder, type EncodedEvent, EncodingError, type EventAction, type EventEmbeddingBookkeeping, type EventEmotion, type EventOutcome, type EventPerson, type EventRecord, type EventScene, type EventSourceRef, type EventStatement, type EventStatus, type EventSummary, type EventUnit, FILES, type FailureEntry, type LogLevel, type Logger, type LoggerOptions, type MemoryConfig, type MemoryPaths, type PluginConfig, RESPONSE_CONTRACT, type RawRecord, type RawRecordKind, type RecallFilters, type RecallHit, type RecallQuery, type RecallResult, type RerankHit, type Reranker, type RetrievalConfig, type RunState, SCHEMA_VERSION, STATE_VERSION, type SecretSource, type SessionCursor, type SessionSourceConfig, type SessionTranscript, type StatementKind, type StructuredEvent, type TriggerConfig, type VectorHit, type VectorRow, type VectorSource, VectorStore, apply, blobToVector, buildEncodingRequest, buildRecord, buildSystemPrompt, buildUnits, clearFailure, consolidate, consolidateOnce, cosineSimilarity, createDistiller, createEmbedder, createLogger, createReranker, decodeZstdFrames, _default as default, defaultConfig, embedOne, embeddingEndpoint, encodeUnit, ensureConfig, ensureDataLayout, eventIdFor, eventIndexPath, eventPair, expandSessionDirs, failureKey, getSessionCursor, inject, isConsolidating, isCoolingDown, listEventSummaries, listSessionFiles, loadConfig, loadCursor, loadRunState, matchFilters, memoryPaths, mergeConfig, missingEventIds, name, normalizeEncodedEvent, normalizeRecords, parseDotEnv, parseEncodingResponse, parseFilterArguments, pendingFailures, pendingRecords, putSessionCursor, readDiary, readEvent, readSecrets, readTranscript, recall, recordFailure, renderRecallText, renderRecords, renderUnitRecords, repairPairs, requireSecret, rerankEndpoint, resolveDataRoot, saveCursor, saveRunState, searchVectors, sessionIdFromPath, shortTermMemory, silentLogger, spanHash, staleEventIds, unitOptionsFromConfig, validateConfig, vectorNorm, vectorToBlob, writeConfig, writeEnvFile, writeEventPair };
+export { Config, type ConsolidateDeps, type ConsolidationConfig, type ConsolidationResult, type CursorState, DIRS, type DashscopeConfig, DashscopeError, DeepseekClient, type DeepseekConfig, DeepseekError, type Distiller, ENCODING_GUIDE, type Embedder, type EncodedEvent, EncodingError, type EventAction, type EventEmbeddingBookkeeping, type EventEmotion, type EventOutcome, type EventPerson, type EventRecord, type EventScene, type EventSourceRef, type EventStatement, type EventStatus, type EventSummary, type EventUnit, FILES, type FailureEntry, type LogLevel, type Logger, type LoggerOptions, type MemoryConfig, type MemoryPaths, type PluginConfig, RESPONSE_CONTRACT, type RawRecord, type RawRecordKind, type RecallFilters, type RecallHit, type RecallQuery, type RecallResult, type RerankHit, type Reranker, type RetrievalConfig, type RunState, SCHEMA_VERSION, STATE_VERSION, type SecretSource, type SessionCursor, type SessionSourceConfig, type SessionTranscript, type SkippedSpan, type StatementKind, type StructuredEvent, type TriggerConfig, type VectorHit, type VectorRow, type VectorSource, VectorStore, apply, blobToVector, buildEncodingRequest, buildRecord, buildSystemPrompt, buildUnits, clearFailure, consolidate, consolidateOnce, cosineSimilarity, createDistiller, createEmbedder, createLogger, createReranker, decodeZstdFrames, _default as default, defaultConfig, embedOne, embeddingEndpoint, encodeUnit, ensureConfig, ensureDataLayout, eventIdFor, eventIndexPath, eventPair, expandSessionDirs, failureKey, getSessionCursor, inject, isConsolidating, isCoolingDown, listEventSummaries, listSessionFiles, loadConfig, loadCursor, loadRunState, matchFilters, memoryPaths, mergeConfig, missingEventIds, name, normalizeEncodedEvent, normalizeRecords, parseDotEnv, parseEncodingResponse, parseFilterArguments, pendingFailures, pendingRecords, putSessionCursor, readDiary, readEvent, readSecrets, readTranscript, recall, recordFailure, renderRecallText, renderRecords, renderUnitRecords, repairPairs, requireSecret, rerankEndpoint, resolveDataRoot, retrySkippedSpans, saveCursor, saveRunState, searchVectors, sessionIdFromPath, shortTermMemory, silentLogger, spanHash, staleEventIds, unitOptionsFromConfig, validateConfig, vectorNorm, vectorToBlob, writeConfig, writeEnvFile, writeEventPair };
