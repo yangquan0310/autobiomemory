@@ -5,8 +5,11 @@
 ## 1. 安装与初始化
 
 ```bash
-# 从 dist 安装（本仓库的打包产物）
-dsh plugin --profile web add "file:/home/ubuntu/dsh-agentchat/runtime/AutoBioMemory/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+# A) 从 GitHub 装（推荐；包内已含预构建 dist/，无需编译）
+dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
+
+# B) 从本地产物装（离线 / 私有仓库；先 pnpm run build && pnpm run pack:dist）
+dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
 
 # 初始化数据根目录（会自动从 ~/.dsh/.env 导入 DeepSeek / DashScope 密钥）
 autobiomemory init
@@ -16,6 +19,15 @@ node dist/cli.js init
 # 自检
 autobiomemory doctor
 ```
+
+`dsh plugin add` 会把包装进 profile 依赖并**自动**追加到 `dsh.profile.bundles`；
+装完必须重启 profile 进程（`dsh web`）才加载新 bundle 层。
+私有仓库的 git 安装需要 GitHub 凭据（PAT / credential helper）。
+
+注意：**不要**指望 `prepare` 钩子在安装时编译——pnpm 10 默认拒绝执行 git 依赖的构建脚本
+（`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`，需在安装方 `pnpm-workspace.yaml` 的
+`onlyBuiltDependencies` 里白名单）。所以本仓库把 4 个运行时产物（`dist/index.js`、
+`dist/index.d.ts`、`dist/cli.js`、`dist/cli.d.ts`）提交进 git，sourcemap 与 tgz 仍忽略。
 
 `init` 之后的数据根目录：
 
