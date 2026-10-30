@@ -103,7 +103,7 @@ export function expandSessionDirs(config: MemoryConfig, cwd: string): string[]  
 ```
 
 Defaults must match `types.ts` docs: `session.readDirs = ['~/.dsh/sessions']`,
-`includeGlobs = ['**/session.jsonl.zstd', '**/session.jsonl']`, `deepseek.baseUrl =
+`includeGlobs = ['**/session*.jsonl.zstd', '**/session*.jsonl']`, `deepseek.baseUrl =
 'https://api.deepseek.com'`, `deepseek.model = 'deepseek-chat'`, `dashscope.region = 'beijing'`,
 `dashscope.baseUrl = 'https://dashscope.aliyuncs.com'`,
 `dashscope.embeddingModel = 'text-embedding-v4'`, `dashscope.embeddingDimensions = 1024`,
