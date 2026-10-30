@@ -232,7 +232,8 @@ function defaultConfig(dataRoot) {
       maxEventsPerRun: 12,
       recentEventLimit: 20,
       cooldownMs: 6e4,
-      serialize: true
+      serialize: true,
+      maxSpanAttempts: 3
     },
     deepseek: {
       baseUrl: "https://api.deepseek.com",
@@ -329,6 +330,7 @@ function validateConfig(config) {
     ["consolidation.maxEventsPerRun", config.consolidation?.maxEventsPerRun],
     ["consolidation.recentEventLimit", config.consolidation?.recentEventLimit],
     ["consolidation.cooldownMs", config.consolidation?.cooldownMs],
+    ["consolidation.maxSpanAttempts", config.consolidation?.maxSpanAttempts],
     ["retrieval.candidateLimit", config.retrieval?.candidateLimit],
     ["retrieval.vectorTopK", config.retrieval?.vectorTopK],
     ["retrieval.rerankTopN", config.retrieval?.rerankTopN],
@@ -2271,6 +2273,7 @@ function loadRunState(paths) {
     ...typeof state.lastRunAt === "string" ? { lastRunAt: state.lastRunAt } : {},
     ...state.lastRunResult ? { lastRunResult: state.lastRunResult } : {},
     failures: { ...state.failures },
+    skipped: { ...state.skipped ?? {} },
     totals: {
       events: Number(state.totals?.events ?? 0) || 0,
       embedded: Number(state.totals?.embedded ?? 0) || 0,
@@ -2280,6 +2283,26 @@ function loadRunState(paths) {
 }
 function saveRunState(paths, state) {
   writeJsonFile(paths.runStateFile, { ...state, version: STATE_VERSION });
+}
+function skippedKey(sessionFile, spanHash2) {
+  return `${sessionFile}#${spanHash2}`;
+}
+function recordSkipped(state, entry) {
+  const span = { ...entry, skippedAt: entry.skippedAt ?? nowIso() };
+  state.skipped = { ...state.skipped ?? {}, [skippedKey(span.sessionFile, span.spanHash)]: span };
+  return span;
+}
+function isSkipped(state, sessionFile, spanHash2) {
+  return (state.skipped ?? {})[skippedKey(sessionFile, spanHash2)] !== void 0;
+}
+function clearSkipped(state, sessionFile) {
+  const skipped = state.skipped ?? {};
+  const keys = Object.keys(skipped).filter(
+    (key) => sessionFile === void 0 ? true : key.startsWith(`${sessionFile}#`)
+  );
+  for (const key of keys) delete skipped[key];
+  state.skipped = skipped;
+  return keys.length;
 }
 function failureKey(kind, target) {
   return `${kind}:${target}`;
@@ -2706,8 +2729,12 @@ async function consolidate(input) {
   };
   ensureDataLayout(paths);
   const runState = loadRunState(paths);
-  if (!input.force && isCoolingDown(runState, config.consolidation.cooldownMs)) {
-    logger.debug("consolidation skipped: cooldown active");
+  const cooldownMs = Math.max(
+    config.consolidation.cooldownMs,
+    config.trigger?.globalCooldownMs ?? 0
+  );
+  if (!input.force && isCoolingDown(runState, cooldownMs)) {
+    logger.debug(`consolidation skipped: cooldown active (${cooldownMs}ms)`);
     return finish({ aborted: "cooldown" });
   }
   const dirs = expandSessionDirs(config, process.cwd());
@@ -2782,9 +2809,13 @@ async function consolidate(input) {
         continue;
       }
       const known = knownSpanHashes(spanState, transcript.sessionFile);
-      const units = buildUnits(transcript, options, previous).filter(
-        (unit) => !known.has(unit.contentHash)
-      );
+      const units = buildUnits(transcript, options, previous).filter((unit) => {
+        if (isSkipped(runState, transcript.sessionFile, unit.contentHash)) {
+          result.details.push(`\u8DF3\u8FC7\u5DF2\u653E\u5F03\u7684\u7247\u6BB5\uFF1A${summarizeUnit(unit)}`);
+          return false;
+        }
+        return !known.has(unit.contentHash);
+      });
       result.unitsFound += units.length;
       for (const unit of units) {
         if (input.signal?.aborted) {
@@ -2816,10 +2847,34 @@ async function consolidate(input) {
           encoded = await distiller.encode(unit);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          recordFailure(runState, "consolidate", file, error);
-          saveRunState(paths, runState);
+          const failure = recordFailure(runState, "consolidate", file, error);
           result.eventsFailed += 1;
           result.details.push(`\u7F16\u7801\u5931\u8D25\uFF1A${summarizeUnit(unit)} \u2014 ${message}`);
+          const maxAttempts = Math.max(1, config.consolidation.maxSpanAttempts);
+          if (failure.attempts >= maxAttempts) {
+            recordSkipped(runState, {
+              sessionFile: transcript.sessionFile,
+              spanHash: unit.contentHash,
+              fromSeq: unit.fromSeq,
+              toSeq: unit.toSeq,
+              attempts: failure.attempts,
+              reason: message.slice(0, 400)
+            });
+            rememberSpan(spanState, transcript.sessionFile, unit.contentHash);
+            putSessionCursor(cursorState, cursorFor(transcript, unit, previous));
+            saveCursor(paths, cursorState);
+            saveSpans(paths, spanState);
+            clearFailure(runState, "consolidate", file);
+            saveRunState(paths, runState);
+            result.details.push(
+              `\u653E\u5F03\u7247\u6BB5\uFF08\u8FDE\u7EED\u5931\u8D25 ${failure.attempts} \u6B21\uFF0C\u6E38\u6807\u524D\u8FDB\uFF09\uFF1A${summarizeUnit(unit)} \u2014 ${message}`
+            );
+            logger.warn(
+              `\u653E\u5F03\u7247\u6BB5 ${summarizeUnit(unit)}\uFF08\u8FDE\u7EED\u5931\u8D25 ${failure.attempts} \u6B21\uFF09\uFF0C\u6E38\u6807\u7EE7\u7EED\u524D\u8FDB`
+            );
+            continue;
+          }
+          saveRunState(paths, runState);
           break;
         }
         budget -= 1;
@@ -2914,6 +2969,8 @@ async function consolidate(input) {
     store?.close();
   }
   if (caughtUpSessions > 0) result.details.push(`\u5DF2\u8FFD\u5E73\u7684\u4F1A\u8BDD\uFF1A${caughtUpSessions}`);
+  const skippedSpans = Object.keys(runState.skipped ?? {}).length;
+  if (skippedSpans > 0) result.details.push(`\u5386\u53F2\u8DF3\u8FC7\u7247\u6BB5\uFF1A${skippedSpans}\uFF08consolidate --retry-skipped \u53EF\u91CD\u8BD5\uFF09`);
   if (input.dryRun) {
     logger.info(`consolidation dry-run: ${result.eventsWritten} event(s) would be written`);
     return finish();
@@ -2928,6 +2985,39 @@ async function consolidate(input) {
     `consolidation done: ${result.eventsWritten} written, ${result.embedded} embedded, ${result.eventsSkipped} skipped, ${result.eventsFailed + result.embedFailed} failed`
   );
   return runState.lastRunResult ?? result;
+}
+function retrySkippedSpans(paths, sessionFile) {
+  const runState = loadRunState(paths);
+  const doomed = Object.values(runState.skipped ?? {}).filter(
+    (span) => sessionFile === void 0 || span.sessionFile === sessionFile
+  );
+  if (doomed.length === 0) return 0;
+  const spans = loadSpans(paths);
+  for (const span of doomed) {
+    const list = spans.spans[span.sessionFile];
+    if (list) spans.spans[span.sessionFile] = list.filter((hash) => hash !== span.spanHash);
+  }
+  saveSpans(paths, spans);
+  const cursors = loadCursor(paths);
+  const rewind = /* @__PURE__ */ new Map();
+  for (const span of doomed) {
+    const current = rewind.get(span.sessionFile);
+    const target = Math.max(0, span.fromSeq - 1);
+    rewind.set(span.sessionFile, current === void 0 ? target : Math.min(current, target));
+  }
+  for (const [file, processed] of rewind) {
+    const cursor = cursors.sessions[file];
+    if (cursor && cursor.processedRecords > processed) {
+      cursors.sessions[file] = { ...cursor, processedRecords: processed, updatedAt: nowIso() };
+    }
+  }
+  saveCursor(paths, cursors);
+  const cleared = clearSkipped(runState, sessionFile);
+  for (const key of Object.keys(runState.failures)) {
+    if (runState.failures[key]?.kind === "consolidate") delete runState.failures[key];
+  }
+  saveRunState(paths, runState);
+  return cleared;
 }
 var CONSOLIDATION_DIRS = [DIRS.events, DIRS.vectors, DIRS.state, DIRS.logs];
 var CONSOLIDATION_FILES = [FILES.cursor, FILES.runState, FILES.vectorDb];
@@ -3465,7 +3555,7 @@ function printHelp() {
   init        \u521D\u59CB\u5316\u6570\u636E\u6839\u76EE\u5F55\uFF08config.json / .env / events / vectors / state\uFF09
   config      \u67E5\u770B\u6216\u4FEE\u6539 config.json\uFF08--set key=value\uFF0C\u53EF\u91CD\u590D\uFF1B--json\uFF09
   status      \u67E5\u770B\u6E38\u6807\u3001\u4E8B\u4EF6\u6570\u3001\u5411\u91CF\u6570\u3001\u5931\u8D25\u961F\u5217
-  consolidate \u6267\u884C\u4E00\u6B21\u589E\u91CF\u6574\u7406\uFF08--force --dry-run --session <file>\uFF09
+  consolidate \u6267\u884C\u4E00\u6B21\u589E\u91CF\u6574\u7406\uFF08--force --dry-run --session <file> --retry-skipped\uFF09
   recall <q>  \u56DE\u5FC6\uFF08--since --until --tag --status --limit --json\uFF09
   embed       \u56DE\u586B\u6216\u5237\u65B0\u5411\u91CF\u7D22\u5F15\uFF08--stale --missing --force\uFF09
   repair      \u4FEE\u590D JSON/MD \u914D\u5BF9\uFF08--dry-run\uFF09
@@ -3635,6 +3725,7 @@ ${problems.map((p) => `  - ${p}`).join("\n")}
         lastRunAt: run.lastRunAt ?? null,
         totals: run.totals,
         failures: Object.values(run.failures),
+        skipped: Object.values(run.skipped ?? {}),
         config: {
           sessions: expandSessionDirs(config, process.cwd()),
           deepseek: { model: config.deepseek.model, baseUrl: config.deepseek.baseUrl },
@@ -3661,6 +3752,7 @@ ${problems.map((p) => `  - ${p}`).join("\n")}
           `\u4E0A\u6B21\u6574\u7406\u3000\u3000 \uFF1A${payload.lastRunAt ?? "\u4ECE\u672A"}`,
           `\u7D2F\u8BA1         \uFF1A\u4E8B\u4EF6 ${run.totals.events} \xB7 \u5411\u91CF ${run.totals.embedded} \xB7 \u8FD0\u884C ${run.totals.runs}`,
           payload.failures.length > 0 ? `\u5931\u8D25\u961F\u5217     \uFF1A${payload.failures.length} \u6761\uFF08\u4E0B\u6B21\u91CD\u8BD5\u6700\u65E9 ${payload.failures[0]?.nextAttemptAt}\uFF09` : "\u5931\u8D25\u961F\u5217     \uFF1A\u7A7A",
+          payload.skipped.length > 0 ? `\u5DF2\u653E\u5F03\u7247\u6BB5   \uFF1A${payload.skipped.length} \u6761\uFF08consolidate --retry-skipped \u53EF\u91CD\u8BD5\uFF09` : "\u5DF2\u653E\u5F03\u7247\u6BB5   \uFF1A\u65E0",
           "",
           ...payload.sessions.map(
             (session) => `  \xB7 ${path9.basename(path9.dirname(session.sessionFile))} \u2014 \u5DF2\u5904\u7406 ${session.processedRecords} \u6761\u8BB0\u5F55 / ${session.fileSize} \u5B57\u8282`
@@ -3674,6 +3766,12 @@ ${problems.map((p) => `  - ${p}`).join("\n")}
       const config = ensureConfig(paths);
       const secrets = readSecrets(paths);
       const dryRun = flagBool(args, "dry-run");
+      if (flagBool(args, "retry-skipped")) {
+        const session = flagString(args, "session");
+        const cleared = retrySkippedSpans(paths, session === void 0 ? void 0 : session);
+        process.stdout.write(`\u5DF2\u6E05\u9664 ${cleared} \u6761"\u653E\u5F03\u7247\u6BB5"\u8BB0\u5F55\uFF0C\u4E0B\u4E00\u6B21\u6574\u7406\u4F1A\u91CD\u8BD5\u5B83\u4EEC\u3002
+`);
+      }
       const result = await consolidate({
         paths,
         config,

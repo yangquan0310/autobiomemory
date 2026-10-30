@@ -237,7 +237,8 @@ function defaultConfig(dataRoot) {
       maxEventsPerRun: 12,
       recentEventLimit: 20,
       cooldownMs: 6e4,
-      serialize: true
+      serialize: true,
+      maxSpanAttempts: 3
     },
     deepseek: {
       baseUrl: "https://api.deepseek.com",
@@ -334,6 +335,7 @@ function validateConfig(config) {
     ["consolidation.maxEventsPerRun", config.consolidation?.maxEventsPerRun],
     ["consolidation.recentEventLimit", config.consolidation?.recentEventLimit],
     ["consolidation.cooldownMs", config.consolidation?.cooldownMs],
+    ["consolidation.maxSpanAttempts", config.consolidation?.maxSpanAttempts],
     ["retrieval.candidateLimit", config.retrieval?.candidateLimit],
     ["retrieval.vectorTopK", config.retrieval?.vectorTopK],
     ["retrieval.rerankTopN", config.retrieval?.rerankTopN],
@@ -2337,6 +2339,7 @@ function loadRunState(paths) {
     ...typeof state.lastRunAt === "string" ? { lastRunAt: state.lastRunAt } : {},
     ...state.lastRunResult ? { lastRunResult: state.lastRunResult } : {},
     failures: { ...state.failures },
+    skipped: { ...state.skipped ?? {} },
     totals: {
       events: Number(state.totals?.events ?? 0) || 0,
       embedded: Number(state.totals?.embedded ?? 0) || 0,
@@ -2346,6 +2349,17 @@ function loadRunState(paths) {
 }
 function saveRunState(paths, state) {
   writeJsonFile(paths.runStateFile, { ...state, version: STATE_VERSION });
+}
+function skippedKey(sessionFile, spanHash2) {
+  return `${sessionFile}#${spanHash2}`;
+}
+function recordSkipped(state, entry) {
+  const span = { ...entry, skippedAt: entry.skippedAt ?? nowIso() };
+  state.skipped = { ...state.skipped ?? {}, [skippedKey(span.sessionFile, span.spanHash)]: span };
+  return span;
+}
+function isSkipped(state, sessionFile, spanHash2) {
+  return (state.skipped ?? {})[skippedKey(sessionFile, spanHash2)] !== void 0;
 }
 function failureKey(kind, target) {
   return `${kind}:${target}`;
@@ -2821,8 +2835,12 @@ async function consolidate(input) {
   };
   ensureDataLayout(paths);
   const runState = loadRunState(paths);
-  if (!input.force && isCoolingDown(runState, config.consolidation.cooldownMs)) {
-    logger.debug("consolidation skipped: cooldown active");
+  const cooldownMs = Math.max(
+    config.consolidation.cooldownMs,
+    config.trigger?.globalCooldownMs ?? 0
+  );
+  if (!input.force && isCoolingDown(runState, cooldownMs)) {
+    logger.debug(`consolidation skipped: cooldown active (${cooldownMs}ms)`);
     return finish({ aborted: "cooldown" });
   }
   const dirs = expandSessionDirs(config, process.cwd());
@@ -2897,9 +2915,13 @@ async function consolidate(input) {
         continue;
       }
       const known = knownSpanHashes(spanState, transcript.sessionFile);
-      const units = buildUnits(transcript, options, previous).filter(
-        (unit) => !known.has(unit.contentHash)
-      );
+      const units = buildUnits(transcript, options, previous).filter((unit) => {
+        if (isSkipped(runState, transcript.sessionFile, unit.contentHash)) {
+          result.details.push(`\u8DF3\u8FC7\u5DF2\u653E\u5F03\u7684\u7247\u6BB5\uFF1A${summarizeUnit(unit)}`);
+          return false;
+        }
+        return !known.has(unit.contentHash);
+      });
       result.unitsFound += units.length;
       for (const unit of units) {
         if (input.signal?.aborted) {
@@ -2931,10 +2953,34 @@ async function consolidate(input) {
           encoded = await distiller.encode(unit);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          recordFailure(runState, "consolidate", file, error);
-          saveRunState(paths, runState);
+          const failure = recordFailure(runState, "consolidate", file, error);
           result.eventsFailed += 1;
           result.details.push(`\u7F16\u7801\u5931\u8D25\uFF1A${summarizeUnit(unit)} \u2014 ${message}`);
+          const maxAttempts = Math.max(1, config.consolidation.maxSpanAttempts);
+          if (failure.attempts >= maxAttempts) {
+            recordSkipped(runState, {
+              sessionFile: transcript.sessionFile,
+              spanHash: unit.contentHash,
+              fromSeq: unit.fromSeq,
+              toSeq: unit.toSeq,
+              attempts: failure.attempts,
+              reason: message.slice(0, 400)
+            });
+            rememberSpan(spanState, transcript.sessionFile, unit.contentHash);
+            putSessionCursor(cursorState, cursorFor(transcript, unit, previous));
+            saveCursor(paths, cursorState);
+            saveSpans(paths, spanState);
+            clearFailure(runState, "consolidate", file);
+            saveRunState(paths, runState);
+            result.details.push(
+              `\u653E\u5F03\u7247\u6BB5\uFF08\u8FDE\u7EED\u5931\u8D25 ${failure.attempts} \u6B21\uFF0C\u6E38\u6807\u524D\u8FDB\uFF09\uFF1A${summarizeUnit(unit)} \u2014 ${message}`
+            );
+            logger.warn(
+              `\u653E\u5F03\u7247\u6BB5 ${summarizeUnit(unit)}\uFF08\u8FDE\u7EED\u5931\u8D25 ${failure.attempts} \u6B21\uFF09\uFF0C\u6E38\u6807\u7EE7\u7EED\u524D\u8FDB`
+            );
+            continue;
+          }
+          saveRunState(paths, runState);
           break;
         }
         budget -= 1;
@@ -3029,6 +3075,8 @@ async function consolidate(input) {
     store?.close();
   }
   if (caughtUpSessions > 0) result.details.push(`\u5DF2\u8FFD\u5E73\u7684\u4F1A\u8BDD\uFF1A${caughtUpSessions}`);
+  const skippedSpans = Object.keys(runState.skipped ?? {}).length;
+  if (skippedSpans > 0) result.details.push(`\u5386\u53F2\u8DF3\u8FC7\u7247\u6BB5\uFF1A${skippedSpans}\uFF08consolidate --retry-skipped \u53EF\u91CD\u8BD5\uFF09`);
   if (input.dryRun) {
     logger.info(`consolidation dry-run: ${result.eventsWritten} event(s) would be written`);
     return finish();
@@ -3046,7 +3094,8 @@ async function consolidate(input) {
 }
 var inFlight;
 function consolidateOnce(input) {
-  if (inFlight) return inFlight;
+  const serialize = input.config.consolidation.serialize !== false;
+  if (serialize && inFlight) return inFlight;
   inFlight = consolidate(input).finally(() => {
     inFlight = void 0;
   });
@@ -3879,26 +3928,30 @@ function apply(ctx, pluginConfig = {}) {
       clearTimeout(timer);
     }
   };
-  ctx.on(
-    "agent/pre-step",
-    async ({ agent }, next) => {
-      await runConsolidation(agent, "pre-step");
-      return next();
-    },
-    { prepend: true }
-  );
+  if (config.trigger.onCompaction !== false) {
+    ctx.on(
+      "agent/pre-step",
+      async ({ agent }, next) => {
+        await runConsolidation(agent, "pre-step");
+        return next();
+      },
+      { prepend: true }
+    );
+  }
   ctx.on("session/event", (session, event) => {
     if (event?.type !== "compaction/start") return;
     const agent = session?.agent;
     void runConsolidation(agent, "compaction/start");
   });
-  if (pluginConfig.consolidateOnIdle === true) {
-    ctx.on(
-      "agent/status",
-      ({ agent, status }) => {
-        if (status === "idle") void runConsolidation(agent, "idle");
-      }
-    );
+  if (pluginConfig.consolidateOnIdle === true || config.trigger.onTurnEnd === true) {
+    ctx.on("agent/status", ({ agent, status }) => {
+      if (status === "idle") void runConsolidation(agent, "idle");
+    });
+  }
+  if (config.trigger.onSessionStart === true) {
+    ctx.on("agent/created", ({ agent }) => {
+      void runConsolidation(agent, "session-start");
+    });
   }
   try {
     const summaries = listEventSummaries(paths);
