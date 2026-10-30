@@ -11,13 +11,22 @@
  * `types.ts` and are re-exported here for convenience.
  */
 
+import { createRequire } from 'node:module'
 import path from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
+import type { DatabaseSync } from 'node:sqlite'
 
 import type { EventSummary, VectorHit, VectorRow, VectorSource } from './types.js'
 import { ensureDir, nowIso } from './util.js'
 
 export type { VectorHit, VectorRow, VectorSource } from './types.js'
+
+/** `node:sqlite` is resolved at runtime: bundlers rewrite static `node:` specifiers. */
+const sqliteRequire = createRequire(import.meta.url)
+
+function openDatabase(file: string): DatabaseSync {
+  const module = sqliteRequire('node:sqlite') as { DatabaseSync: new (path: string, options?: { timeout?: number }) => DatabaseSync }
+  return new module.DatabaseSync(file, { timeout: 5000 })
+}
 
 /** Bytes per float32 element in a stored vector blob. */
 const FLOAT_BYTES = 4
@@ -176,7 +185,7 @@ export class VectorStore implements VectorSource {
     ensureDir(path.dirname(dbFile))
     // The plugin and the CLI may hold the file at the same time; WAL plus a
     // busy timeout keeps those writers queueing instead of failing.
-    const db = new DatabaseSync(dbFile, { timeout: 5000 })
+    const db = openDatabase(dbFile)
     this.db = db
     try {
       // `:memory:` stays in journal mode `memory`; some network filesystems

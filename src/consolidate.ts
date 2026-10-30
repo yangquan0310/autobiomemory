@@ -114,8 +114,12 @@ function orderByRecency(files: string[]): string[] {
   return [...files].sort((a, b) => stat(b) - stat(a))
 }
 
+function sessionLabel(sessionFile: string): string {
+  return truncate(path.basename(path.dirname(sessionFile)), 42) || path.basename(sessionFile)
+}
+
 function summarizeUnit(unit: EventUnit): string {
-  const span = `${truncate(path.basename(unit.sessionFile), 40)} seq ${unit.fromSeq}-${unit.toSeq}`
+  const span = `${sessionLabel(unit.sessionFile)} seq ${unit.fromSeq}-${unit.toSeq}`
   return `${span} · ${unit.records.length} 条记录 · ${unit.chars} 字`
 }
 
@@ -263,7 +267,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
 
       result.sessionsScanned += 1
       if (failedTargets.has(file) && !input.force) {
-        result.details.push(`跳过（失败退避中）：${path.basename(file)}`)
+        result.details.push(`跳过（失败退避中）：${sessionLabel(file)}`)
         continue
       }
 
@@ -274,7 +278,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         const message = error instanceof Error ? error.message : String(error)
         recordFailure(runState, 'consolidate', file, error)
         result.eventsFailed += 1
-        result.details.push(`读取失败：${path.basename(file)} — ${message}`)
+        result.details.push(`读取失败：${sessionLabel(file)} — ${message}`)
         continue
       }
       if (transcript.records.length === 0) continue
@@ -282,7 +286,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
       let previous = getSessionCursor(cursorState, transcript.sessionFile)
       if (previous && transcript.fileSize < previous.fileSize) {
         // The transcript was rotated or rewritten: start over for this file.
-        result.details.push(`检测到会话被重写，游标重置：${path.basename(file)}`)
+        result.details.push(`检测到会话被重写，游标重置：${sessionLabel(file)}`)
         previous = undefined
       }
 
@@ -316,9 +320,18 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
           continue
         }
 
+        if (input.dryRun) {
+          result.eventsWritten += 1
+          result.details.push(`[dry-run] 将编码事件 ${eventId}：${summarizeUnit(unit)}`)
+          rememberSpan(spanState, transcript.sessionFile, unit.contentHash)
+          putSessionCursor(cursorState, cursorFor(transcript, unit, previous))
+          budget -= 1
+          continue
+        }
+
         let encoded
         try {
-          if (!distiller) throw new Error('distiller unavailable')
+          if (!distiller) throw new Error('缺少编码器（请检查 DeepSeek 密钥与配置）')
           encoded = await distiller.encode(unit)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -331,14 +344,6 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         }
 
         budget -= 1
-
-        if (input.dryRun) {
-          result.eventsWritten += 1
-          result.details.push(`[dry-run] 将写入事件 ${eventId}：${summarizeUnit(unit)}`)
-          rememberSpan(spanState, transcript.sessionFile, unit.contentHash)
-          putSessionCursor(cursorState, cursorFor(transcript, unit, previous))
-          continue
-        }
 
         // Provenance is ours: never trust (or lose) what the encoder said about sources.
         const sources = encoded.structured.sources ?? []
@@ -442,6 +447,11 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
   }
 
   if (caughtUpSessions > 0) result.details.push(`已追平的会话：${caughtUpSessions}`)
+  if (input.dryRun) {
+    // A dry run must leave no trace: no run timestamp, no totals, no cursor, no span memory.
+    logger.info(`consolidation dry-run: ${result.eventsWritten} event(s) would be written`)
+    return finish()
+  }
   runState.lastRunAt = nowIso()
   runState.totals.runs += 1
   runState.totals.events += result.eventsWritten
