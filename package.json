@@ -1,0 +1,80 @@
+{
+  "name": "deepseek-harness-autobiomemory",
+  "version": "0.1.0",
+  "description": "AutoBioMemory — first-person autobiographical memory for DeepSeek Harness agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    }
+  },
+  "bin": {
+    "autobiomemory": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "docs",
+    "AGENTS.md",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run build",
+    "cli": "node dist/cli.js",
+    "pack:dist": "node scripts/pack-dist.mjs"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "memory",
+    "autobiographical-memory",
+    "cordis"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.1",
+    "@deepseek-ai/dsh-agent": ">=0.1.0-rc.7",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc.7",
+    "@deepseek-ai/dsh-session-persistence": ">=0.1.0-rc.7",
+    "@deepseek-ai/dsh-system-prompt": ">=0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.7"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.7",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.7",
+    "@types/node": "^24.3.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

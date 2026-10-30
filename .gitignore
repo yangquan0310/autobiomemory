@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.turbo/
+coverage/
+*.log
+.DS_Store
+*.tgz
+research/
+scratch/
+.worktrees/
