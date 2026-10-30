@@ -1,0 +1,28 @@
+# AutoBioMemory — profile patch layer.
+#
+# Installed as a dsh bundle (`dsh.bundle.patch`), this layer inserts the plugin into the
+# composed profile tree. Configuration here is only bootstrap-level: the real settings live in
+# `~/.autobiomemory/config.json`, secrets in `~/.autobiomemory/.env`.
+#
+# Override any value from the profile's own `cordis.patch.yml`:
+#   - id: autobiomemory
+#     config:
+#       autoConsolidate: false
+- insert:
+    - id: autobiomemory
+      name: deepseek-harness-autobiomemory
+      config:
+        # Data root; defaults to $DSH_AUTOBIO_ROOT or ~/.autobiomemory
+        dataRoot: !!js process.env.DSH_AUTOBIO_ROOT ?? undefined
+        # Consolidate the raw transcript before the harness compacts the context.
+        autoConsolidate: !!js process.env.DSH_AUTOBIO_AUTO ?? true
+        # Also consolidate when an agent goes idle after a turn (off: pre-step is enough).
+        consolidateOnIdle: false
+        # Tools exposed to the model.
+        toolName: !!js process.env.DSH_AUTOBIO_TOOL ?? 'autobiomemory_recall'
+        consolidateToolName: !!js process.env.DSH_AUTOBIO_CONSOLIDATE_TOOL ?? 'autobiomemory_consolidate'
+        # Time box for the pre-compaction consolidation so a slow API never stalls a turn.
+        preCompactionTimeoutMs: 20000
+        # Short-term memory digest in the system prompt (recent event diaries).
+        shortTermInPrompt: true
+        shortTermPromptChars: 2400
