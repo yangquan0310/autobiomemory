@@ -1,6 +1,6 @@
 {
   "name": "deepseek-harness-autobiomemory",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AutoBioMemory — first-person autobiographical memory for DeepSeek Harness agents",
   "type": "module",
   "main": "dist/index.js",

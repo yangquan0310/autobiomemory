@@ -31,13 +31,17 @@ import {
 } from './store.js'
 import {
   clearFailure,
+  clearSkipped,
+  failureAttempts,
   getSessionCursor,
   isCoolingDown,
+  isSkipped,
   loadCursor,
   loadRunState,
   pendingFailures,
   putSessionCursor,
   recordFailure,
+  recordSkipped,
   saveCursor,
   saveRunState,
 } from './state.js'
@@ -209,8 +213,14 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
   ensureDataLayout(paths)
 
   const runState = loadRunState(paths)
-  if (!input.force && isCoolingDown(runState, config.consolidation.cooldownMs)) {
-    logger.debug('consolidation skipped: cooldown active')
+  // Both knobs are real: the per-run cooldown and the global trigger cooldown. Whichever is
+  // larger wins, so an automatic trigger can never run more often than either says.
+  const cooldownMs = Math.max(
+    config.consolidation.cooldownMs,
+    config.trigger?.globalCooldownMs ?? 0,
+  )
+  if (!input.force && isCoolingDown(runState, cooldownMs)) {
+    logger.debug(`consolidation skipped: cooldown active (${cooldownMs}ms)`)
     return finish({ aborted: 'cooldown' })
   }
 
@@ -297,9 +307,13 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
       }
 
       const known = knownSpanHashes(spanState, transcript.sessionFile)
-      const units = buildUnits(transcript, options, previous).filter(
-        (unit) => !known.has(unit.contentHash),
-      )
+      const units = buildUnits(transcript, options, previous).filter((unit) => {
+        if (isSkipped(runState, transcript.sessionFile, unit.contentHash)) {
+          result.details.push(`跳过已放弃的片段：${summarizeUnit(unit)}`)
+          return false
+        }
+        return !known.has(unit.contentHash)
+      })
       result.unitsFound += units.length
 
       for (const unit of units) {
@@ -335,11 +349,39 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
           encoded = await distiller.encode(unit)
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
-          recordFailure(runState, 'consolidate', file, error)
-          saveRunState(paths, runState)
+          const failure = recordFailure(runState, 'consolidate', file, error)
           result.eventsFailed += 1
           result.details.push(`编码失败：${summarizeUnit(unit)} — ${message}`)
-          // Do not advance past this unit: the next run retries it.
+
+          const maxAttempts = Math.max(1, config.consolidation.maxSpanAttempts)
+          if (failure.attempts >= maxAttempts) {
+            // Poison span: give up on this one span only, record it, and step the cursor
+            // past it so the rest of the session keeps flowing. `--retry-skipped` undoes it.
+            recordSkipped(runState, {
+              sessionFile: transcript.sessionFile,
+              spanHash: unit.contentHash,
+              fromSeq: unit.fromSeq,
+              toSeq: unit.toSeq,
+              attempts: failure.attempts,
+              reason: message.slice(0, 400),
+            })
+            rememberSpan(spanState, transcript.sessionFile, unit.contentHash)
+            putSessionCursor(cursorState, cursorFor(transcript, unit, previous))
+            saveCursor(paths, cursorState)
+            saveSpans(paths, spanState)
+            clearFailure(runState, 'consolidate', file)
+            saveRunState(paths, runState)
+            result.details.push(
+              `放弃片段（连续失败 ${failure.attempts} 次，游标前进）：${summarizeUnit(unit)} — ${message}`,
+            )
+            logger.warn(
+              `放弃片段 ${summarizeUnit(unit)}（连续失败 ${failure.attempts} 次），游标继续前进`,
+            )
+            continue
+          }
+
+          saveRunState(paths, runState)
+          // Budgeted retry: the next run retries the same span, cursor stays put.
           break
         }
 
@@ -447,6 +489,8 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
   }
 
   if (caughtUpSessions > 0) result.details.push(`已追平的会话：${caughtUpSessions}`)
+  const skippedSpans = Object.keys(runState.skipped ?? {}).length
+  if (skippedSpans > 0) result.details.push(`历史跳过片段：${skippedSpans}（consolidate --retry-skipped 可重试）`)
   if (input.dryRun) {
     // A dry run must leave no trace: no run timestamp, no totals, no cursor, no span memory.
     logger.info(`consolidation dry-run: ${result.eventsWritten} event(s) would be written`)
@@ -469,7 +513,8 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
 let inFlight: Promise<ConsolidationResult> | undefined
 
 export function consolidateOnce(input: ConsolidateDeps): Promise<ConsolidationResult> {
-  if (inFlight) return inFlight
+  const serialize = input.config.consolidation.serialize !== false
+  if (serialize && inFlight) return inFlight
   inFlight = consolidate(input).finally(() => {
     inFlight = undefined
   })
@@ -478,6 +523,51 @@ export function consolidateOnce(input: ConsolidateDeps): Promise<ConsolidationRe
 
 export function isConsolidating(): boolean {
   return inFlight !== undefined
+}
+
+/** Forget skipped spans so they are attempted again (`consolidate --retry-skipped`). */
+export function retrySkippedSpans(
+  paths: Parameters<typeof loadRunState>[0],
+  sessionFile?: string,
+): number {
+  const runState = loadRunState(paths)
+  const doomed = Object.values(runState.skipped ?? {}).filter(
+    (span) => sessionFile === undefined || span.sessionFile === sessionFile,
+  )
+  if (doomed.length === 0) return 0
+
+  // Forget both the skip mark AND the span memory, otherwise the dedupe layer would
+  // still filter the span out before the encoder ever sees it.
+  const spans = loadSpans(paths)
+  for (const span of doomed) {
+    const list = spans.spans[span.sessionFile]
+    if (list) spans.spans[span.sessionFile] = list.filter((hash) => hash !== span.spanHash)
+  }
+  saveSpans(paths, spans)
+
+  // Rewind each affected session's cursor to just before its earliest skipped span, so the
+  // retry can actually reach it without hand-editing state/cursor.json.
+  const cursors = loadCursor(paths)
+  const rewind = new Map<string, number>()
+  for (const span of doomed) {
+    const current = rewind.get(span.sessionFile)
+    const target = Math.max(0, span.fromSeq - 1)
+    rewind.set(span.sessionFile, current === undefined ? target : Math.min(current, target))
+  }
+  for (const [file, processed] of rewind) {
+    const cursor = cursors.sessions[file]
+    if (cursor && cursor.processedRecords > processed) {
+      cursors.sessions[file] = { ...cursor, processedRecords: processed, updatedAt: nowIso() }
+    }
+  }
+  saveCursor(paths, cursors)
+
+  const cleared = clearSkipped(runState, sessionFile)
+  for (const key of Object.keys(runState.failures)) {
+    if (runState.failures[key]?.kind === 'consolidate') delete runState.failures[key]
+  }
+  saveRunState(paths, runState)
+  return cleared
 }
 
 /** Names of the sub-directories the write path owns (for `doctor`). */

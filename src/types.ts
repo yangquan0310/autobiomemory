@@ -67,6 +67,11 @@ export interface ConsolidationConfig {
   cooldownMs: number
   /** Whether a run may proceed while another is in flight in this process. */
   serialize: boolean
+  /**
+   * How many encode attempts one span gets before it is marked skipped and the cursor
+   * moves past it. Keeps a poison span from stalling a session forever.
+   */
+  maxSpanAttempts: number
 }
 
 export interface DeepseekConfig {
@@ -394,11 +399,24 @@ export interface FailureEntry {
   nextAttemptAt: string
 }
 
+/** A span that repeatedly failed to encode and was deliberately stepped over. */
+export interface SkippedSpan {
+  sessionFile: string
+  spanHash: string
+  fromSeq: number
+  toSeq: number
+  attempts: number
+  reason: string
+  skippedAt: string
+}
+
 export interface RunState {
   version: number
   lastRunAt?: string
   lastRunResult?: ConsolidationResult
   failures: Record<string, FailureEntry>
+  /** Spans given up on, keyed by `<sessionFile>#<spanHash>`. */
+  skipped?: Record<string, SkippedSpan>
   totals: { events: number; embedded: number; runs: number }
 }
 
