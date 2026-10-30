@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import zlib from 'node:zlib'
 
@@ -212,7 +213,7 @@ describe('helpers', () => {
   })
 
   it('lists session files by glob', () => {
-    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'abm-session-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abm-session-'))
     const nested = path.join(root, 'proj', 'sess-1')
     fs.mkdirSync(nested, { recursive: true })
     const file = path.join(nested, 'session.jsonl.zstd')
@@ -220,6 +221,13 @@ describe('helpers', () => {
     fs.writeFileSync(path.join(nested, 'other.txt'), 'ignore me')
     expect(listSessionFiles([root])).toEqual([file])
     expect(listSessionFiles([root], ['**/session.jsonl.zstd'], ['**/skip/**'])).toEqual([file])
+
+    // dsh 0.2.x stamps the session-format version into the filename; the shipped
+    // default globs must keep finding those transcripts.
+    const versioned = path.join(nested, 'session.v4.jsonl.zstd')
+    fs.writeFileSync(versioned, framesOf([line({ type: 'session', id: 'y' })]))
+    expect(listSessionFiles([root])).toEqual([file, versioned])
+    expect(listSessionFiles([root], ['**/session.jsonl.zstd'])).toEqual([file])
   })
 })
 
@@ -238,7 +246,7 @@ describe('buildUnits', () => {
   }
 
   it('starts a unit at a user record and splits before the next one', () => {
-    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'abm-units-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abm-units-'))
     const file = path.join(root, 'session.jsonl.zstd')
     const secondUser = line({
       type: 'user/message',
@@ -267,7 +275,7 @@ describe('buildUnits', () => {
   })
 
   it('never splits a tool call from its result when the budget forces a close', () => {
-    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'abm-units-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abm-units-'))
     const file = path.join(root, 'session.jsonl.zstd')
     const transcript = transcriptOf(
       [sessionHeader, turnStart, userMessage, assistantMessage, toolCall, toolResult],
@@ -281,7 +289,7 @@ describe('buildUnits', () => {
   })
 
   it('holds the tail back and drops undersized units', () => {
-    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'abm-units-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abm-units-'))
     const file = path.join(root, 'session.jsonl.zstd')
     const transcript = transcriptOf(
       [sessionHeader, turnStart, userMessage, assistantMessage, toolCall, toolResult],
@@ -292,7 +300,7 @@ describe('buildUnits', () => {
   })
 
   it('respects the cursor', () => {
-    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? '/tmp', 'abm-units-'))
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abm-units-'))
     const file = path.join(root, 'session.jsonl.zstd')
     const transcript = transcriptOf(
       [sessionHeader, turnStart, userMessage, assistantMessage, toolCall, toolResult],

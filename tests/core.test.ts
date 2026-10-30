@@ -35,12 +35,14 @@ const tmpRoot = (): string => fs.mkdtempSync(path.join(os.tmpdir(), 'abm-core-')
 
 describe('resolveDataRoot', () => {
   it('prefers the explicit override, then env, then the home default', () => {
-    expect(resolveDataRoot('/tmp/explicit')).toBe('/tmp/explicit')
+    const explicit = path.join(os.tmpdir(), 'abm-explicit')
+    const fromEnv = path.join(os.tmpdir(), 'abm-from-env')
+    expect(resolveDataRoot(explicit)).toBe(path.resolve(explicit))
     const saved = process.env.DSH_AUTOBIO_ROOT
-    process.env.DSH_AUTOBIO_ROOT = '/tmp/from-env'
+    process.env.DSH_AUTOBIO_ROOT = fromEnv
     try {
-      expect(resolveDataRoot()).toBe('/tmp/from-env')
-      expect(resolveDataRoot('/tmp/explicit')).toBe('/tmp/explicit')
+      expect(resolveDataRoot()).toBe(path.resolve(fromEnv))
+      expect(resolveDataRoot(explicit)).toBe(path.resolve(explicit))
     } finally {
       if (saved === undefined) delete process.env.DSH_AUTOBIO_ROOT
       else process.env.DSH_AUTOBIO_ROOT = saved
@@ -184,10 +186,12 @@ describe('config', () => {
   })
 
   it('expands, resolves and de-duplicates session dirs', () => {
-    const config = defaultConfig('/tmp/root')
-    config.session.readDirs = ['~/.dsh/sessions', 'relative/dir', '/abs/dir', '/abs/dir', '  ']
-    const dirs = expandSessionDirs(config, '/work')
-    expect(dirs).toEqual([path.join(os.homedir(), '.dsh', 'sessions'), path.join('/work', 'relative/dir'), '/abs/dir'])
+    const config = defaultConfig(path.join(os.tmpdir(), 'abm-root'))
+    const absolute = path.join(os.tmpdir(), 'abm-abs-dir')
+    const cwd = path.join(os.tmpdir(), 'abm-work')
+    config.session.readDirs = ['~/.dsh/sessions', 'relative/dir', absolute, absolute, '  ']
+    const dirs = expandSessionDirs(config, cwd)
+    expect(dirs).toEqual([path.join(os.homedir(), '.dsh', 'sessions'), path.resolve(cwd, 'relative/dir'), absolute])
   })
 })
 

@@ -31,6 +31,18 @@ function copyInto(target, source) {
   fs.cpSync(source, target, { recursive: true })
 }
 
+// dist/ is committed and dist/cli.js ships as the `autobiomemory` bin. A CRLF shebang
+// fails on Unix with `bad interpreter`, so refuse to pack a Windows-contaminated tree.
+for (const file of ['index.js', 'cli.js']) {
+  const target = path.join(distDir, file)
+  if (!fs.existsSync(target)) continue
+  const built = fs.readFileSync(target, 'utf8')
+  if (built.includes('\r\n')) {
+    console.error(`dist/${file} contains CRLF line endings; re-checkout with LF before packing`)
+    process.exit(1)
+  }
+}
+
 const rootPkg = readJson(path.join(repo, 'package.json'))
 
 if (!fs.existsSync(path.join(repo, 'dist', 'index.js'))) {
@@ -77,13 +89,21 @@ const pkgJson = {
 fs.writeFileSync(path.join(pkgDir, 'package.json'), `${JSON.stringify(pkgJson, null, 2)}\n`)
 
 // tarball via pnpm pack so `file:` installs behave exactly like a registry install
+/**
+ * pnpm is a `.cmd` shim on Windows and Node cannot exec a `.cmd` directly, so route
+ * through cmd.exe there. The destination is quoted so a checkout path with spaces works.
+ */
+function packWithPnpm() {
+  const options = { cwd: pkgDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }
+  const args = ['pack', '--pack-destination', distDir]
+  if (process.platform !== 'win32') return execFileSync('pnpm', args, options)
+  const quoted = args.map((arg) => (arg.includes(' ') ? `"${arg}"` : arg)).join(' ')
+  return execFileSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `pnpm ${quoted}`], options)
+}
+
 let tarball
 try {
-  const out = execFileSync('pnpm', ['pack', '--pack-destination', distDir], {
-    cwd: pkgDir,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  })
+  const out = packWithPnpm()
   const last = out.trim().split('\n').pop() ?? ''
   tarball = path.isAbsolute(last) ? last : path.join(distDir, last)
 } catch (error) {

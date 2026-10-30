@@ -75,7 +75,7 @@ node dist/cli.js status --json
 node dist/cli.js recall "上次安装插件是怎么做的" --json
 ```
 
-会话读取出问题时，先确认解码器：`decodeZstdFrames` 对任何 `session.jsonl.zstd` 都应
+会话读取出问题时，先确认解码器：`decodeZstdFrames` 对任何 `session*.jsonl.zstd` 都应
 `consumedBytes === file.size`。若小于，说明尾部是正在写入的半帧（正常），若为 0 则是帧头解析错误。
 
 ## 加一个新模块

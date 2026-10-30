@@ -1,8 +1,9 @@
 /**
  * AutoBioMemory — raw session transcripts, read in place.
  *
- * dsh appends one **independent zstd frame per write** to `session.jsonl.zstd`
- * (live files on this machine carry thousands of them), and `zlib.zstdDecompressSync`
+ * dsh appends one **independent zstd frame per write** to the transcript file
+ * (`session.v4.jsonl.zstd` on dsh 0.2.x, `session.jsonl.zstd` on older builds; live
+ * files on this machine carry thousands of frames), and `zlib.zstdDecompressSync`
  * decodes only the first frame. So we walk the concatenated frame headers ourselves:
  * magic → frame header → blocks → optional checksum trailer, decompressing each frame
  * separately and concatenating the payloads.
@@ -150,7 +151,7 @@ function walkFiles(dir: string, depth: number, out: string[]): void {
 /** Enumerate session transcripts under the configured directories. */
 export function listSessionFiles(
   readDirs: string[],
-  includeGlobs: string[] = ['**/session.jsonl.zstd', '**/session.jsonl'],
+  includeGlobs: string[] = ['**/session*.jsonl.zstd', '**/session*.jsonl'],
   excludeGlobs: string[] = [],
 ): string[] {
   const includes = includeGlobs.map(globToRegExp)
@@ -181,7 +182,8 @@ export function listSessionFiles(
   return [...found].sort()
 }
 
-/** `…/agentchat-web-v1-<id>/session.jsonl.zstd` → the directory name, else the file stem. */
+/** `…/agentchat-web-v1-<id>/session.jsonl.zstd` → the directory name, else the file stem.
+ *  The stem fallback also covers versioned transcripts such as `session.v4.jsonl.zstd`. */
 export function sessionIdFromPath(file: string): string {
   const dir = path.basename(path.dirname(file))
   if (dir && dir !== '.' && dir !== path.sep) return dir
