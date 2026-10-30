@@ -1,0 +1,6 @@
+# pnpm 11 moved build-script approval out of package.json's `pnpm` field.
+# esbuild (pulled in by tsup and vitest) needs its postinstall to place the
+# platform binary; without this every `pnpm run check` fails with
+# ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  esbuild: true

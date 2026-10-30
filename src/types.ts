@@ -323,7 +323,7 @@ export interface VectorSource {
 }
 
 /* ------------------------------------------------------------------ *
- * Raw session records (normalised view over session.jsonl.zstd)
+ * Raw session records (normalised view over the dsh transcript, e.g. session.v4.jsonl.zstd)
  * ------------------------------------------------------------------ */
 
 export type RawRecordKind =

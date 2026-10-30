@@ -13,7 +13,7 @@
                     └───────────────────────────┬──────────────────────────────┘
                                                 ▼
   原始会话（只读、原地）                    ┌──────────────┐
-  ~/.dsh/sessions/**/session.jsonl.zstd ──▶ │ consolidate  │  ← state/cursor.json（游标）
+  ~/.dsh/sessions/**/session*.jsonl.zstd ──▶ │ consolidate  │  ← state/cursor.json（游标）
                                             │              │  ← state/spans.json（去重哈希）
                                             └──────┬───────┘
                                                    │ 选"相对完整的事件"片段（units）
@@ -110,7 +110,7 @@
     "entities": ["deepseek-harness-autobiomemory"],
     "lessons": ["安装后必须重启 profile 才加载新 bundle 层"],
     "openQuestions": ["重启窗口期由谁负责"],
-    "sources": [{ "sessionId": "…", "sessionFile": "/home/ubuntu/.dsh/sessions/…/session.jsonl.zstd",
+    "sources": [{ "sessionId": "…", "sessionFile": "/home/ubuntu/.dsh/sessions/…/session.v4.jsonl.zstd",
                   "fromSeq": 120, "toSeq": 210, "recordCount": 91, "contentHash": "…" }]
   }
 }

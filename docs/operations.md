@@ -9,7 +9,7 @@
 dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
 
 # B) 从本地产物装（离线 / 私有仓库；先 pnpm run build && pnpm run pack:dist）
-dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 
 # 初始化数据根目录（会自动从 ~/.dsh/.env 导入 DeepSeek / DashScope 密钥）
 autobiomemory init
@@ -56,7 +56,7 @@ autobiomemory config            # 打印当前有效配置
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
 | `session.readDirs` | `["~/.dsh/sessions"]` | 原始会话读取目录（原地读，绝不移动） |
-| `session.includeGlobs` | `["**/session.jsonl.zstd","**/session.jsonl"]` | 认为哪些文件是会话 |
+| `session.includeGlobs` | `["**/session*.jsonl.zstd","**/session*.jsonl"]` | 认为哪些文件是会话 |
 | `session.maxRecordsPerEvent` | `200` | 单个事件最多吸收多少条原始记录 |
 | `session.tailRecords` | `6` | 尾部保留多少条留到下一轮（避免编码半截对话） |
 | `consolidation.maxInputChars` | `60000` | 单次编码的输入字符预算 |
@@ -96,7 +96,7 @@ DASHSCOPE_API_KEY=sk-...
 autobiomemory status                    # 事件数、向量数、游标、失败队列
 autobiomemory consolidate --force       # 立刻整理一轮（跳过冷却）
 autobiomemory consolidate --dry-run     # 只报告会写什么，不落盘
-autobiomemory consolidate --session /path/to/session.jsonl.zstd
+autobiomemory consolidate --session /path/to/session.v4.jsonl.zstd
 autobiomemory consolidate --retry-skipped           # 重试"已放弃片段"（会回卷游标）
 autobiomemory recall "上次部署是怎么做的" --since 2025-10-01 --status completed
 autobiomemory recall "…" --json         # 机器可读

@@ -1,0 +1,19 @@
+# Normalise every text file to LF in the working tree.
+#
+# Why this exists: `dist/` is committed and `dist/cli.js` is published as the
+# `autobiomemory` bin. On a Windows checkout with `core.autocrlf=true` (the Git
+# for Windows default) the working tree held CRLF, so a `pnpm run pack:dist`
+# from that machine would ship a `#!/usr/bin/env node\r` shebang and every Unix
+# install would fail with `bad interpreter`. Pinning `eol=lf` here makes the
+# working tree byte-identical on every platform, regardless of `autocrlf`.
+* text=auto eol=lf
+
+# Never rewrite binary payloads while normalising.
+*.zstd binary
+*.tgz  binary
+*.sqlite binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
