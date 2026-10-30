@@ -1,5 +1,11 @@
+# build output: only the runtime artifacts are committed so that
+# `dsh plugin add github:<owner>/<repo>` works without a build step
+/dist/**
+!/dist/index.js
+!/dist/index.d.ts
+!/dist/cli.js
+!/dist/cli.d.ts
 node_modules/
-dist/
 *.tsbuildinfo
 .turbo/
 coverage/

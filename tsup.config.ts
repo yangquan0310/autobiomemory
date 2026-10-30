@@ -16,6 +16,9 @@ export default defineConfig({
   shims: false,
   // The harness runtime provides these; never inline them into the bundle.
   external: [
+    // esbuild strips the `node:` prefix from builtins in this target, which turns
+    // `node:sqlite` into the unresolvable bare specifier `sqlite`: keep it verbatim.
+    'node:sqlite',
     '@deepseek-ai/cordis',
     '@deepseek-ai/schemastery',
     '@deepseek-ai/dsh-agent',
@@ -24,7 +27,4 @@ export default defineConfig({
     '@deepseek-ai/dsh-system-prompt',
     '@deepseek-ai/dsh-tools',
   ],
-  banner: {
-    js: '#!/usr/bin/env node',
-  },
 })

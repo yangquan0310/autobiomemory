@@ -8,6 +8,7 @@ import type {
   MemoryPaths,
   RunState,
   SessionCursor,
+  SkippedSpan,
 } from './types.js'
 
 const MAX_RETRY_DELAY_MS = 30 * 60 * 1000
@@ -50,6 +51,7 @@ export function loadRunState(paths: MemoryPaths): RunState {
     ...(typeof state.lastRunAt === 'string' ? { lastRunAt: state.lastRunAt } : {}),
     ...(state.lastRunResult ? { lastRunResult: state.lastRunResult } : {}),
     failures: { ...state.failures },
+    skipped: { ...(state.skipped ?? {}) },
     totals: {
       events: Number(state.totals?.events ?? 0) || 0,
       embedded: Number(state.totals?.embedded ?? 0) || 0,
@@ -60,6 +62,40 @@ export function loadRunState(paths: MemoryPaths): RunState {
 
 export function saveRunState(paths: MemoryPaths, state: RunState): void {
   writeJsonFile(paths.runStateFile, { ...state, version: STATE_VERSION })
+}
+
+export function skippedKey(sessionFile: string, spanHash: string): string {
+  return `${sessionFile}#${spanHash}`
+}
+
+/** Mark one span as given up on (already recorded as a failure `attempts` times). */
+export function recordSkipped(
+  state: RunState,
+  entry: Omit<SkippedSpan, 'skippedAt'> & { skippedAt?: string },
+): SkippedSpan {
+  const span: SkippedSpan = { ...entry, skippedAt: entry.skippedAt ?? nowIso() }
+  state.skipped = { ...(state.skipped ?? {}), [skippedKey(span.sessionFile, span.spanHash)]: span }
+  return span
+}
+
+export function isSkipped(state: RunState, sessionFile: string, spanHash: string): boolean {
+  return (state.skipped ?? {})[skippedKey(sessionFile, spanHash)] !== undefined
+}
+
+/** How many times this span has already failed (0 when it never failed). */
+export function failureAttempts(state: RunState, kind: FailureEntry['kind'], target: string): number {
+  return state.failures[failureKey(kind, target)]?.attempts ?? 0
+}
+
+/** Forget every skipped span of one session (or all of them) so it is retried again. */
+export function clearSkipped(state: RunState, sessionFile?: string): number {
+  const skipped = state.skipped ?? {}
+  const keys = Object.keys(skipped).filter((key) =>
+    sessionFile === undefined ? true : key.startsWith(`${sessionFile}#`),
+  )
+  for (const key of keys) delete skipped[key]
+  state.skipped = skipped
+  return keys.length
 }
 
 export function failureKey(kind: FailureEntry['kind'], target: string): string {

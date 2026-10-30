@@ -32,6 +32,7 @@ export function defaultConfig(dataRoot?: string): MemoryConfig {
       recentEventLimit: 20,
       cooldownMs: 60_000,
       serialize: true,
+      maxSpanAttempts: 3,
     },
     deepseek: {
       baseUrl: 'https://api.deepseek.com',
@@ -137,6 +138,7 @@ export function validateConfig(config: MemoryConfig): string[] {
     ['consolidation.maxEventsPerRun', config.consolidation?.maxEventsPerRun],
     ['consolidation.recentEventLimit', config.consolidation?.recentEventLimit],
     ['consolidation.cooldownMs', config.consolidation?.cooldownMs],
+    ['consolidation.maxSpanAttempts', config.consolidation?.maxSpanAttempts],
     ['retrieval.candidateLimit', config.retrieval?.candidateLimit],
     ['retrieval.vectorTopK', config.retrieval?.vectorTopK],
     ['retrieval.rerankTopN', config.retrieval?.rerankTopN],

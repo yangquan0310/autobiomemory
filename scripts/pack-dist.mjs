@@ -84,7 +84,8 @@ try {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'inherit'],
   })
-  tarball = path.join(distDir, out.trim().split('\n').pop())
+  const last = out.trim().split('\n').pop() ?? ''
+  tarball = path.isAbsolute(last) ? last : path.join(distDir, last)
 } catch (error) {
   console.warn(`pnpm pack failed (${error.message}); the dist/package directory is still installable`)
 }

@@ -9,7 +9,7 @@ const config = {
   version: 1,
   dataRoot: '/tmp/root',
   session: { readDirs: ['~'], includeGlobs: [], excludeGlobs: [], minRecordsPerEvent: 2, maxRecordsPerEvent: 200, tailRecords: 6 },
-  consolidation: { maxInputChars: 60000, minEventChars: 120, maxEventsPerRun: 12, recentEventLimit: 20, cooldownMs: 60000, serialize: true },
+  consolidation: { maxInputChars: 60000, minEventChars: 120, maxEventsPerRun: 12, recentEventLimit: 20, cooldownMs: 60000, serialize: true, maxSpanAttempts: 3 },
   deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', temperature: 0.4, maxTokens: 8000, timeoutMs: 240000, jsonMode: true, retries: 3 },
   dashscope: { region: 'beijing', baseUrl: 'https://dashscope.aliyuncs.com', embeddingModel: 'text-embedding-v4', embeddingDimensions: 1024, embeddingBatchSize: 8, rerankModel: 'gte-rerank-v2', rerankTopN: 20, rerankEnabled: true, timeoutMs: 60000, retries: 3 },
   retrieval: { candidateLimit: 200, vectorTopK: 30, rerankTopN: 8, finalLimit: 5, shortTermCount: 8, includeSources: true, minScore: 0, maxReplyChars: 6000 },
