@@ -7,6 +7,35 @@
  */
 
 /* ------------------------------------------------------------------ *
+ * Data-root layout and secrets
+ * ------------------------------------------------------------------ */
+
+/** Absolute paths of everything AutoBioMemory keeps under `~/.autobiomemory`. */
+export interface MemoryPaths {
+  root: string
+  configFile: string
+  envFile: string
+  eventsDir: string
+  vectorsDir: string
+  stateDir: string
+  logsDir: string
+  cursorFile: string
+  runStateFile: string
+  eventIndexFile: string
+  vectorDb: string
+}
+
+/** API keys, wherever they were found. */
+export interface SecretSource {
+  deepseekApiKey?: string
+  dashscopeApiKey?: string
+  origin: {
+    deepseek: '.env' | 'process' | 'missing'
+    dashscope: '.env' | 'process' | 'missing'
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Configuration
  * ------------------------------------------------------------------ */
 
@@ -237,6 +266,55 @@ export interface EventRecord {
   embedding?: EventEmbeddingBookkeeping
   /** Nothing but facts carried over from encoding. */
   revision: number
+}
+
+/** Index row for one stored event pair. */
+export interface EventSummary {
+  id: string
+  title: string
+  occurredAt: string
+  endedAt: string
+  status: EventStatus
+  tags: string[]
+  people: string[]
+  keywords: string[]
+  entities: string[]
+  project?: string
+  /** sha256 of the diary body currently on disk. */
+  diaryHash: string
+  diaryChars: number
+  revision: number
+  jsonFile: string
+  mdFile: string
+  updatedAt: string
+  /** Set when the JSON/MD pair on disk is inconsistent. */
+  problem?: 'missing-md' | 'missing-json' | 'hash-mismatch' | 'unreadable-json'
+}
+
+/* ------------------------------------------------------------------ *
+ * Vector index rows
+ * ------------------------------------------------------------------ */
+
+export interface VectorRow {
+  eventId: string
+  model: string
+  dimensions: number
+  /** sha256 of the diary body that was embedded. */
+  textHash: string
+  vector: number[]
+  /** Pre-computed L2 norm. */
+  norm: number
+  updatedAt: string
+}
+
+export interface VectorHit {
+  eventId: string
+  cosine: number
+}
+
+/** Minimal read surface `recall()` needs from the vector index. */
+export interface VectorSource {
+  all(): VectorRow[]
 }
 
 /* ------------------------------------------------------------------ *
