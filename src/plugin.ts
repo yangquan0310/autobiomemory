@@ -305,8 +305,8 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
           },
           render: (_args, value) => [{ type: 'text', text: value.text }],
           presentationMeta: (_args, value) => ({
-            title: `回忆 · ${value.hits.length} 条`,
-            hits: value.hits.length,
+            title: `回忆 · ${value.hits?.length ?? 0} 条`,
+            hits: value.hits?.length ?? 0,
           }),
         },
         isConcurrencySafe: () => true,
@@ -334,16 +334,19 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
             const reranker = secrets.dashscopeApiKey
               ? createReranker(config.dashscope, requireSecret(secrets, 'dashscope'), logger)
               : undefined
-            const result = await recall({
-              config,
-              summaries,
-              readRecord: (id) => readEvent(runtime.paths, id),
-              vectors: store,
-              embedder,
-              reranker,
-              logger,
-              signal: exec.signal,
-            })
+            const result = await recall(
+              {
+                config,
+                summaries,
+                readRecord: (id) => readEvent(runtime.paths, id),
+                vectors: store,
+                ...(embedder === undefined ? {} : { embedder }),
+                ...(reranker === undefined ? {} : { reranker }),
+                logger,
+                signal: exec.signal,
+              },
+              query,
+            )
             logger.debug(`recall "${truncate(query.query, 40)}" → ${result.hits.length} hits`)
             return {
               text: renderHits(result),
@@ -472,7 +475,7 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
   // own `agent/pre-step` listener, so a prepended listener observes the moment before it decides.
   ctx.on(
     'agent/pre-step',
-    async ({ agent }: { agent: unknown }, next: () => Promise<unknown>) => {
+    async ({ agent }, next) => {
       await runConsolidation(agent, 'pre-step')
       return next()
     },
@@ -480,8 +483,10 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
   )
 
   // Belt and braces: `compaction/start` is a durable session event written before summarization.
-  ctx.on('session/event', (session: unknown, event: { type?: string }) => {
-    if (event?.type !== 'compaction/start') return
+  ctx.on('session/event', (session, event) => {
+    // `compaction/*` arrives through declaration merging from @deepseek-ai/dsh-compaction,
+    // which may not be installed in every profile: compare on the widened type.
+    if ((event?.type as string | undefined) !== 'compaction/start') return
     const agent = (session as { agent?: unknown } | undefined)?.agent
     void runConsolidation(agent, 'compaction/start')
   })

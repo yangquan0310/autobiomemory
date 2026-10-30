@@ -18,15 +18,10 @@ import { DIRS, FILES } from './constants.js'
 import { expandSessionDirs } from './config.js'
 import { requireSecret, type SecretSource } from './env.js'
 import { createEmbedder } from './embed.js'
-import { createDistiller } from './distill.js'
+import { createDistiller, sourceRefFor } from './distill.js'
 import { createLogger } from './logger.js'
 import { ensureDataLayout, memoryPaths, type MemoryPaths } from './paths.js'
-import {
-  listSessionFiles,
-  pendingRecords,
-  readTranscript,
-  type SessionTranscript,
-} from './session-reader.js'
+import { listSessionFiles, pendingRecords, readTranscript } from './session-reader.js'
 import {
   buildRecord,
   eventIdFor,
@@ -47,7 +42,7 @@ import {
   saveRunState,
 } from './state.js'
 import { buildUnits, unitOptionsFromConfig, type UnitOptions } from './units.js'
-import { VectorStore, staleEventIds, vectorToBlob, vectorNorm } from './vectors.js'
+import { VectorStore, missingEventIds, staleEventIds, vectorNorm } from './vectors.js'
 import { nowIso, readJsonFile, writeJsonFile, sha256, truncate } from './util.js'
 import type {
   ConsolidationResult,
@@ -57,6 +52,7 @@ import type {
   Logger,
   MemoryConfig,
   SessionCursor,
+  SessionTranscript,
 } from './types.js'
 
 /** Sidecar that remembers which spans were already encoded, per raw transcript. */
@@ -252,6 +248,8 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
   const spanState = loadSpans(paths)
   const store = input.dryRun ? undefined : new VectorStore(paths.vectorDb)
   const failedTargets = new Set(pendingFailures(runState).map((entry) => entry.target))
+  /** Events whose embedding was already attempted in this run (success or not). */
+  const attemptedEmbed = new Set<string>()
   let budget = Math.max(1, config.consolidation.maxEventsPerRun)
   let caughtUpSessions = 0
 
@@ -342,6 +340,11 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
           continue
         }
 
+        // Provenance is ours: never trust (or lose) what the encoder said about sources.
+        const sources = encoded.structured.sources ?? []
+        if (sources.length === 0 || sources.some((ref) => ref.contentHash !== unit.contentHash)) {
+          encoded.structured.sources = [sourceRefFor(unit)]
+        }
         const revision = existing ? existing.revision + 1 : 1
         const record = buildRecord(encoded, { id: eventId, revision })
         try {
@@ -360,6 +363,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         // Embedding is best-effort: a failure leaves the event on disk and the vector
         // index behind, which the stale-vector sweep below repairs on a later run.
         if (embedder && store) {
+          attemptedEmbed.add(eventId)
           try {
             await indexDiary({ config, paths, embedder, store, logger }, eventId, record.diary)
             result.embedded += 1
@@ -414,8 +418,11 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
     // --- stale / missing vector sweep (failure continuation) ---
     if (store && embedder && !input.signal?.aborted) {
       const summaries = listEventSummaries(paths, { refresh: true })
-      const stale = [...new Set([...staleEventIds(store, summaries)])]
+      const stale = [
+        ...new Set([...missingEventIds(store, summaries), ...staleEventIds(store, summaries)]),
+      ]
       for (const eventId of stale.slice(0, config.consolidation.maxEventsPerRun)) {
+        if (attemptedEmbed.has(eventId)) continue
         const record = readEvent(paths, eventId)
         if (!record) continue
         try {

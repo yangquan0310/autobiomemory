@@ -14,7 +14,7 @@ export interface DistillDeps {
   client?: Pick<DeepseekClient, 'chat'> & { lastUsage?: DeepseekClient['lastUsage'] }
 }
 
-function sourceRefFor(unit: EventUnit): EventSourceRef {
+export function sourceRefFor(unit: EventUnit): EventSourceRef {
   return {
     sessionId: unit.sessionId,
     sessionFile: unit.sessionFile,
