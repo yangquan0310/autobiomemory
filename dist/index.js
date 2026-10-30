@@ -2361,6 +2361,15 @@ function recordSkipped(state, entry) {
 function isSkipped(state, sessionFile, spanHash2) {
   return (state.skipped ?? {})[skippedKey(sessionFile, spanHash2)] !== void 0;
 }
+function clearSkipped(state, sessionFile) {
+  const skipped = state.skipped ?? {};
+  const keys = Object.keys(skipped).filter(
+    (key) => sessionFile === void 0 ? true : key.startsWith(`${sessionFile}#`)
+  );
+  for (const key of keys) delete skipped[key];
+  state.skipped = skipped;
+  return keys.length;
+}
 function failureKey(kind, target) {
   return `${kind}:${target}`;
 }
@@ -3103,6 +3112,39 @@ function consolidateOnce(input) {
 }
 function isConsolidating() {
   return inFlight !== void 0;
+}
+function retrySkippedSpans(paths, sessionFile) {
+  const runState = loadRunState(paths);
+  const doomed = Object.values(runState.skipped ?? {}).filter(
+    (span) => sessionFile === void 0 || span.sessionFile === sessionFile
+  );
+  if (doomed.length === 0) return 0;
+  const spans = loadSpans(paths);
+  for (const span of doomed) {
+    const list = spans.spans[span.sessionFile];
+    if (list) spans.spans[span.sessionFile] = list.filter((hash) => hash !== span.spanHash);
+  }
+  saveSpans(paths, spans);
+  const cursors = loadCursor(paths);
+  const rewind = /* @__PURE__ */ new Map();
+  for (const span of doomed) {
+    const current = rewind.get(span.sessionFile);
+    const target = Math.max(0, span.fromSeq - 1);
+    rewind.set(span.sessionFile, current === void 0 ? target : Math.min(current, target));
+  }
+  for (const [file, processed] of rewind) {
+    const cursor = cursors.sessions[file];
+    if (cursor && cursor.processedRecords > processed) {
+      cursors.sessions[file] = { ...cursor, processedRecords: processed, updatedAt: nowIso() };
+    }
+  }
+  saveCursor(paths, cursors);
+  const cleared = clearSkipped(runState, sessionFile);
+  for (const key of Object.keys(runState.failures)) {
+    if (runState.failures[key]?.kind === "consolidate") delete runState.failures[key];
+  }
+  saveRunState(paths, runState);
+  return cleared;
 }
 var CONSOLIDATION_DIRS = [DIRS.events, DIRS.vectors, DIRS.state, DIRS.logs];
 var CONSOLIDATION_FILES = [FILES.cursor, FILES.runState, FILES.vectorDb];
@@ -4043,6 +4085,7 @@ export {
   requireSecret,
   rerankEndpoint,
   resolveDataRoot,
+  retrySkippedSpans,
   saveCursor,
   saveRunState,
   searchVectors,
