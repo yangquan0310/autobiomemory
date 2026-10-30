@@ -36,6 +36,16 @@ autobiomemory consolidate --force
 autobiomemory recall "我来这里之后做了哪些事"
 ```
 
+## 已验证（本机实测）
+
+数据根 `/home/ubuntu/.autobiomemory`，插件从 `dist/` 装入 `web` profile：
+
+- `doctor` 13 项全绿：DeepSeek `HTTP 200`、`text-embedding-v4` 1024d、`gte-rerank-v2`
+- `consolidate --force` 从真实会话（4230 条记录 / 2.4MB）写出 **6 个事件**，0 失败，6 条向量
+- `recall "我为什么中断了那三个子代理？"` 四段流水线全命中（短时 6 / 结构化 6 / 向量 6 / rerank 6），
+  rerank 把《我写文档、锁依赖版本，并中断停滞的子代理》排在第一位（0.46，其余 ≤0.20）
+- `plugin --profile web add` 后 `--dump-config` 可见 `deepseek-harness-autobiomemory` 层
+
 ## 数据根目录
 
 ```

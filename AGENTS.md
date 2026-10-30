@@ -122,3 +122,7 @@ node dist/cli.js recall "上次部署是怎么做的"
 4. **游标语义**：`cursor.processedRecords` 是"已并入事件的最后一条记录 seq"；编码失败时**不得**前进，否则该片段永久丢失。
 5. **向量新鲜度**：以 `sha256(diary)` 为准；改写日记必须让向量失效并回填，否则召回会指向过期文本。
 6. **配对一致性**：先写 JSON 再写 MD；MD 只放日记正文；hash 不匹配就修，不匹配就隔离。
+7. **打包坑（已修）**：esbuild 会把 `node:` 前缀抹掉，`node:sqlite` 变成不可解析的裸模块 `sqlite` ——
+   改用 `createRequire(import.meta.url)('node:sqlite')` 运行时解析，且 `tsup` 里不要再加 shebang banner
+   （`src/cli.ts` 自带，重复会 SyntaxError）。
+8. **dry-run 不许留痕**：`consolidate --dry-run` 不写 run state、不写游标、不写 spans，只报告。
