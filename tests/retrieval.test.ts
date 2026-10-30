@@ -265,6 +265,7 @@ function makeConfig(overrides: Partial<RetrievalConfig> = {}): MemoryConfig {
       recentEventLimit: 20,
       cooldownMs: 60_000,
       serialize: true,
+      maxSpanAttempts: 3,
     },
     deepseek: {
       baseUrl: 'https://api.deepseek.com',

@@ -412,3 +412,133 @@ describe('consolidate', () => {
     expect(result.eventsWritten).toBe(0)
   })
 })
+
+describe('v0.1.1 hardening', () => {
+  beforeEach(() => {
+    freshEnv()
+  })
+
+  it('gives up on a poison span after maxSpanAttempts and keeps the session moving', async () => {
+    const file = path.join(sessionsDir, 'proj', 'sess-1', 'session.jsonl.zstd')
+    writeSession(file, [line({ type: 'session', id: 'sess-1', createdAt: 1, cwd: '/work' }), ...turn(1, 1, '第一段会失败')])
+
+    const cfg = mergeConfig(config, { consolidation: { maxSpanAttempts: 2 } })
+    const always: Distiller = {
+      async encode(unit: EventUnit) {
+        const user = unit.records.find((record) => record.kind === 'user')
+        if (user?.text === '第一段会失败') throw new Error('响应不是合法 JSON')
+        return fakeDistiller().encode(unit)
+      },
+    }
+    const deps = { paths, config: cfg, secrets, logger: silentLogger(), embedder: fakeEmbedder, force: true }
+
+    // attempt 1 → failure, cursor stays
+    const first = await consolidate({ ...deps, distiller: always })
+    expect(first.eventsFailed).toBe(1)
+    expect(loadCursor(paths).sessions[file]?.processedRecords ?? 0).toBe(0)
+
+    // attempt 2 → reaches maxSpanAttempts → span skipped, cursor advances
+    const second = await consolidate({ ...deps, distiller: always })
+    expect(second.eventsFailed).toBe(1)
+    expect(second.details.some((d) => d.includes('放弃片段'))).toBe(true)
+    expect(loadCursor(paths).sessions[file]?.processedRecords ?? 0).toBeGreaterThan(0)
+    expect(Object.keys(loadRunState(paths).skipped ?? {})).toHaveLength(1)
+
+    // the rest of the session now flows: append a new turn and encode it normally
+    appendSession(file, turn(1, 2, '第二段正常'))
+    const third = await consolidate({ ...deps, distiller: always })
+    expect(third.eventsWritten).toBe(1)
+    expect(listEventSummaries(paths, { refresh: true })).toHaveLength(1)
+  })
+
+  it('skips a span that was already given up on, and retrySkippedSpans restores it', async () => {
+    const file = path.join(sessionsDir, 'proj', 'sess-1', 'session.jsonl.zstd')
+    writeSession(file, [line({ type: 'session', id: 'sess-1', createdAt: 1, cwd: '/work' }), ...turn(1, 1, '毒片段')])
+    const cfg = mergeConfig(config, { consolidation: { maxSpanAttempts: 1 } })
+    const poison: Distiller = {
+      async encode() {
+        throw new Error('永远失败')
+      },
+    }
+    const deps = { paths, config: cfg, secrets, logger: silentLogger(), embedder: fakeEmbedder, force: true }
+
+    await consolidate({ ...deps, distiller: poison })
+    const state = loadRunState(paths)
+    expect(Object.keys(state.skipped ?? {})).toHaveLength(1)
+
+    // a later run does not even try it again (the cursor already moved past it)
+    const again = await consolidate({ ...deps, distiller: poison })
+    expect(again.eventsFailed).toBe(0)
+    expect(again.eventsWritten).toBe(0)
+
+    // if the transcript is rewritten (cursor reset), the skip mark still suppresses the retry
+    const cursorState = loadCursor(paths)
+    const existing = cursorState.sessions[file]
+    if (existing) cursorState.sessions[file] = { ...existing, processedRecords: 0 }
+    const { saveCursor } = await import('../src/state.js')
+    saveCursor(paths, cursorState)
+    const afterReset = await consolidate({ ...deps, distiller: poison })
+    expect(afterReset.eventsFailed).toBe(0)
+    expect(afterReset.details.some((d) => d.includes('跳过已放弃的片段'))).toBe(true)
+
+    // clearing the skip mark rewinds the cursor and makes the span a candidate again
+    const { retrySkippedSpans } = await import('../src/consolidate.js')
+    expect(retrySkippedSpans(paths)).toBe(1)
+    // the cursor was rewound to just before the skipped span (fromSeq 3 → processedRecords 2)
+    expect(loadCursor(paths).sessions[file]?.processedRecords).toBe(2)
+    expect(Object.keys(loadRunState(paths).skipped ?? {})).toHaveLength(0)
+    const retried = await consolidate({ ...deps, distiller: fakeDistiller() })
+    expect(retried.eventsWritten).toBe(1)
+  })
+
+  it('uses the larger of the two cooldown knobs', async () => {
+    const file = path.join(sessionsDir, 'proj', 'sess-1', 'session.jsonl.zstd')
+    writeSession(file, [line({ type: 'session', id: 'sess-1' }), ...turn(1, 1, '冷却')])
+    const cfg = mergeConfig(config, {
+      consolidation: { cooldownMs: 0 },
+      trigger: { globalCooldownMs: 600_000 },
+    })
+    const deps = { paths, config: cfg, secrets, logger: silentLogger(), embedder: fakeEmbedder, distiller: fakeDistiller() }
+
+    const first = await consolidate({ ...deps, force: true })
+    expect(first.eventsWritten).toBe(1)
+    const second = await consolidate({ ...deps })
+    expect(second.aborted).toBe('cooldown')
+    const forced = await consolidate({ ...deps, force: true })
+    expect(forced.aborted).not.toBe('cooldown')
+  })
+
+  it('respects serialize=false by allowing a second concurrent run', async () => {
+    const file = path.join(sessionsDir, 'proj', 'sess-1', 'session.jsonl.zstd')
+    writeSession(file, [line({ type: 'session', id: 'sess-1' }), ...turn(1, 1, '并发')])
+    const cfg = mergeConfig(config, { consolidation: { serialize: false } })
+    const slow: Distiller = {
+      async encode(unit: EventUnit) {
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        return fakeDistiller().encode(unit)
+      },
+    }
+    const { consolidateOnce } = await import('../src/consolidate.js')
+    const base = { paths, config: cfg, secrets, logger: silentLogger(), embedder: fakeEmbedder, distiller: slow, force: true }
+    const [a, b] = await Promise.all([consolidateOnce(base), consolidateOnce(base)])
+    expect(a.eventsWritten + b.eventsWritten).toBeGreaterThanOrEqual(1)
+    // dedupe still holds: the same span never becomes two events
+    expect(listEventSummaries(paths, { refresh: true })).toHaveLength(1)
+  })
+
+  it('serialize=true returns the in-flight run instead of starting another', async () => {
+    const file = path.join(sessionsDir, 'proj', 'sess-1', 'session.jsonl.zstd')
+    writeSession(file, [line({ type: 'session', id: 'sess-1' }), ...turn(1, 1, '串行')])
+    const slow: Distiller = {
+      async encode(unit: EventUnit) {
+        await new Promise((resolve) => setTimeout(resolve, 40))
+        return fakeDistiller().encode(unit)
+      },
+    }
+    const { consolidateOnce } = await import('../src/consolidate.js')
+    const base = { paths, config, secrets, logger: silentLogger(), embedder: fakeEmbedder, distiller: slow, force: true }
+    const [a, b] = await Promise.all([consolidateOnce(base), consolidateOnce(base)])
+    expect(a).toBe(b)
+    expect(listEventSummaries(paths, { refresh: true })).toHaveLength(1)
+  })
+})
