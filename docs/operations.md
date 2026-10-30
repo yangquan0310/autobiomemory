@@ -9,7 +9,7 @@
 dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
 
 # B) 从本地产物装（离线 / 私有仓库；先 pnpm run build && pnpm run pack:dist）
-dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:/abs/path/to/autobiomemory/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 
 # 初始化数据根目录（会自动从 ~/.dsh/.env 导入 DeepSeek / DashScope 密钥）
 autobiomemory init

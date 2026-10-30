@@ -96,7 +96,7 @@ git checkout alpha && git merge --no-ff feat/core feat/session ...
 git checkout beta && pnpm run check && pnpm run build && pnpm run pack:dist
 
 # 从 dist 安装插件
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 ```
 
 安装后**必须重启 profile 进程**（`dsh web`）才会加载新的 bundle 层。

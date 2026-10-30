@@ -1,5 +1,9 @@
 # AutoBioMemory
 
+[![release](https://img.shields.io/github/v/release/yangquan0310/autobiomemory?label=release)](https://github.com/yangquan0310/autobiomemory/releases)
+[![tests](https://img.shields.io/badge/tests-163%20passing-brightgreen)](tests/)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 > 给 DeepSeek Harness 的 agent 一份**自传体记忆**：它以我自己的行动为线索，把经历写成第一人称事件日记，
 > 让我在之后需要时按需回忆。
 
@@ -21,22 +25,31 @@
 
 三种方式，任选其一。**装完都要重启 profile 进程**（`dsh web`）才会加载新的 bundle 层。
 
-### A. 直接从 GitHub 安装（最简单）
+### A. 从 GitHub Release 安装（最省事，推荐）
+
+```bash
+dsh plugin --profile web add \
+  "https://github.com/yangquan0310/autobiomemory/releases/download/v0.1.1/deepseek-harness-autobiomemory-0.1.1.tgz"
+```
+
+Release 里的 tgz 就是 `dist/` 打包产物（含预构建的 `dist/` 与 `cordis.patch.yml`），
+**版本号钉死在 URL 里**，不会因为分支变动而漂移。
+
+### A2. 从分支源码安装（跟最新提交）
 
 ```bash
 dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
 ```
 
-`dsh plugin` 会把包放进 profile 的依赖，并**自动**把 `deepseek-harness-autobiomemory`
-追加进 `dsh.profile.bundles`（已随包提供预构建的 `dist/`，安装时不需要编译）。
-仓库若为**私有**，pnpm 需要 GitHub 凭据（PAT / credential helper）；公开仓库无需任何凭据。
-锁定到某个版本就用 commit sha 代替 `#main`。
+`dsh plugin` 会把包放进 profile 依赖，并**自动**把 `deepseek-harness-autobiomemory`
+追加进 `dsh.profile.bundles`。仓库已把 4 个运行时产物提交进 git，所以 git 安装也不需要编译。
+想钉到某个提交就用 sha 代替 `#main`。
 
 ### B. 从本地 `dist/` 安装（离线 / 内网）
 
 ```bash
 pnpm run build && pnpm run pack:dist          # 产出 dist/package/ 与 dist/*.tgz
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 ```
 
 ### C. 从源码开发
@@ -44,7 +57,7 @@ dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.
 ```bash
 git clone https://github.com/yangquan0310/autobiomemory.git && cd autobiomemory
 pnpm install && pnpm run check                # typecheck + 158 个测试 + build
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
 ```
 
 ### 初始化与自检（三种方式都一样）
