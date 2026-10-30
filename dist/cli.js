@@ -220,7 +220,10 @@ function defaultConfig(dataRoot) {
     dataRoot: dataRoot ?? "",
     session: {
       readDirs: ["~/.dsh/sessions"],
-      includeGlobs: ["**/session.jsonl.zstd", "**/session.jsonl"],
+      // dsh names transcripts with a session-format version (`session.v4.jsonl.zstd`
+      // on 0.2.x). Keep the glob version-agnostic so a dsh upgrade cannot silently
+      // hide every transcript from consolidation.
+      includeGlobs: ["**/session*.jsonl.zstd", "**/session*.jsonl"],
       excludeGlobs: [],
       minRecordsPerEvent: 2,
       maxRecordsPerEvent: 200,
@@ -1525,7 +1528,7 @@ function walkFiles(dir, depth, out) {
     else if (entry.isFile()) out.push(full);
   }
 }
-function listSessionFiles(readDirs, includeGlobs = ["**/session.jsonl.zstd", "**/session.jsonl"], excludeGlobs = []) {
+function listSessionFiles(readDirs, includeGlobs = ["**/session*.jsonl.zstd", "**/session*.jsonl"], excludeGlobs = []) {
   const includes = includeGlobs.map(globToRegExp);
   const excludes = excludeGlobs.map(globToRegExp);
   const found = /* @__PURE__ */ new Set();

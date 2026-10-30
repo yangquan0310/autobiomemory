@@ -3,6 +3,37 @@
 All notable changes to AutoBioMemory. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versions follow the package version.
 
+## [0.1.2] — 2026-10-30
+
+### Fixed
+
+- **Sessions written by dsh 0.2.x are discovered again.** dsh stamps the session-format version
+  into the transcript filename (`session.v4.jsonl.zstd`), so the shipped default
+  `**/session.jsonl.zstd` glob matched nothing: a healthy install reported `0 sessions` and
+  consolidation silently did nothing. The defaults are now `**/session*.jsonl.zstd` and
+  `**/session*.jsonl`, so versioned and unversioned transcripts are both found and a future
+  format bump cannot hide every session again. Explicitly configured `session.includeGlobs`
+  are untouched.
+
+### Changed
+
+- **The working tree is LF on every platform.** A new `.gitattributes`
+  (`* text=auto eol=lf`) stops Git for Windows' `core.autocrlf` from checking `dist/` out as
+  CRLF. Without it, `pnpm run pack:dist` on Windows shipped a `#!/usr/bin/env node\r` shebang
+  and every Unix install failed with `bad interpreter`. `pack-dist.mjs` now also refuses to
+  pack a CRLF-contaminated `dist/`.
+- **`pnpm run check` works on pnpm 11 again.** pnpm 11 no longer reads `package.json`'s
+  `pnpm.onlyBuiltDependencies`, so the run died with `ERR_PNPM_IGNORED_BUILDS` before executing
+  a single test. `pnpm-workspace.yaml` now carries `allowBuilds: {esbuild: true}`.
+
+### Tests
+
+- The suite is platform-neutral: temporary directories come from `os.tmpdir()` and path
+  assertions compare against `path.resolve(...)` instead of literal POSIX paths. The suite is
+  green on Windows for the first time (162 passed / 1 skipped).
+- `lists session files by glob` now places `session.jsonl.zstd` and `session.v4.jsonl.zstd` in
+  one directory and asserts that the default globs return both.
+
 ## [0.1.1] — 2026-10-30
 
 ### Fixed
