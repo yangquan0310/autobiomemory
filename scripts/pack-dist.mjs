@@ -31,6 +31,18 @@ function copyInto(target, source) {
   fs.cpSync(source, target, { recursive: true })
 }
 
+// dist/ is committed and dist/cli.js ships as the `autobiomemory` bin. A CRLF shebang
+// fails on Unix with `bad interpreter`, so refuse to pack a Windows-contaminated tree.
+for (const file of ['index.js', 'cli.js']) {
+  const target = path.join(distDir, file)
+  if (!fs.existsSync(target)) continue
+  const built = fs.readFileSync(target, 'utf8')
+  if (built.includes('\r\n')) {
+    console.error(`dist/${file} contains CRLF line endings; re-checkout with LF before packing`)
+    process.exit(1)
+  }
+}
+
 const rootPkg = readJson(path.join(repo, 'package.json'))
 
 if (!fs.existsSync(path.join(repo, 'dist', 'index.js'))) {
