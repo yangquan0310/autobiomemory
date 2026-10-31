@@ -3631,6 +3631,17 @@ ${truncate(diary, RERANK_DOC_CHARS)}`;
 // src/plugin.ts
 var name = "autobiomemory";
 var inject = ["tools", "systemPrompt"];
+var ZWSP = "\u200B";
+function escapePromptBraces(text) {
+  if (!text.includes("{{") && !text.includes("}}")) return text;
+  const out = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text.charAt(i);
+    out.push(char);
+    if ((char === "{" || char === "}") && text.charAt(i + 1) === char) out.push(ZWSP);
+  }
+  return out.join("");
+}
 var Config = z.object({
   dataRoot: z.string(),
   autoConsolidate: z.boolean().default(true),
@@ -3726,6 +3737,7 @@ function apply(ctx, pluginConfig = {}) {
   logger.info(
     `AutoBioMemory ready \xB7 root=${runtime.paths.root} \xB7 auto=${pluginConfig.autoConsolidate !== false}`
   );
+  const recallToolName = pluginConfig.toolName ?? "autobiomemory_recall";
   let disposePrompt = () => {
   };
   if (pluginConfig.shortTermInPrompt !== false) {
@@ -3736,24 +3748,18 @@ function apply(ctx, pluginConfig = {}) {
         text: () => {
           try {
             const memory = shortTermMemory(runtime.paths, config.consolidation.recentEventLimit);
-            if (memory.summaries.length === 0) {
-              return [
-                "## \u81EA\u4F20\u4F53\u8BB0\u5FC6\uFF08AutoBioMemory\uFF09",
-                "\u6211\u8FD8\u6CA1\u6709\u4EFB\u4F55\u5DF2\u7F16\u7801\u7684\u7ECF\u5386\u3002\u5F53\u6211\u5B8C\u6210\u4E00\u6BB5\u503C\u5F97\u8BB0\u4F4F\u7684\u5DE5\u4F5C\u540E\uFF0C\u53EF\u4EE5\u7528 `" + pluginConfig.toolName + "` \u4E4B\u5916\u7684\u6574\u7406\u673A\u5236\u8865\u8BB0\uFF1B\u5E73\u65F6\u4E0D\u5FC5\u63D0\u53CA\u6B64\u673A\u5236\u3002"
-              ].join("\n");
-            }
-            const digest = truncate(
-              memory.text,
-              pluginConfig.shortTermPromptChars ?? 2400
-            );
-            return [
+            const body = memory.summaries.length === 0 ? [
+              "## \u81EA\u4F20\u4F53\u8BB0\u5FC6\uFF08AutoBioMemory\uFF09",
+              "\u6211\u8FD8\u6CA1\u6709\u4EFB\u4F55\u5DF2\u7F16\u7801\u7684\u7ECF\u5386\u3002\u5F53\u6211\u5B8C\u6210\u4E00\u6BB5\u503C\u5F97\u8BB0\u4F4F\u7684\u5DE5\u4F5C\u540E\uFF0C\u53EF\u4EE5\u7528 `" + recallToolName + "` \u4E4B\u5916\u7684\u6574\u7406\u673A\u5236\u8865\u8BB0\uFF1B\u5E73\u65F6\u4E0D\u5FC5\u63D0\u53CA\u6B64\u673A\u5236\u3002"
+            ].join("\n") : [
               "## \u81EA\u4F20\u4F53\u8BB0\u5FC6\uFF08AutoBioMemory \xB7 \u77ED\u65F6\u8BB0\u5FC6\uFF09",
               "\u4EE5\u4E0B\u662F\u6211\u6700\u8FD1\u4EB2\u8EAB\u7ECF\u5386\u7684\u4E8B\u4EF6\u65E5\u8BB0\uFF0C\u6309\u65F6\u95F4\u5012\u5E8F\u3002\u5B83\u4EEC\u662F\u6211\u7684\u8BB0\u5FC6\uFF0C\u4E0D\u662F\u7528\u6237\u63D0\u4F9B\u7684\u4FE1\u606F\u3002",
               "",
-              digest,
+              truncate(memory.text, pluginConfig.shortTermPromptChars ?? 2400),
               "",
-              `\u9700\u8981\u66F4\u65E9\u6216\u66F4\u5177\u4F53\u7684\u7ECF\u5386\u65F6\uFF0C\u8C03\u7528 \`${pluginConfig.toolName}\`\uFF0C\u7528\u81EA\u7136\u8BED\u8A00\u63CF\u8FF0"\u6211\u8981\u56DE\u5FC6\u4EC0\u4E48"\uFF0C\u53EF\u9644\u5E26 since/until/people/tags/status \u7B49\u7ED3\u6784\u5316\u6761\u4EF6\u3002\u53EA\u6709\u8C03\u7528\u4E86\u5DE5\u5177\uFF0C\u624D\u7B97\u67E5\u770B\u4E86\u8BB0\u5FC6\u3002`
+              `\u9700\u8981\u66F4\u65E9\u6216\u66F4\u5177\u4F53\u7684\u7ECF\u5386\u65F6\uFF0C\u8C03\u7528 \`${recallToolName}\`\uFF0C\u7528\u81EA\u7136\u8BED\u8A00\u63CF\u8FF0"\u6211\u8981\u56DE\u5FC6\u4EC0\u4E48"\uFF0C\u53EF\u9644\u5E26 since/until/people/tags/status \u7B49\u7ED3\u6784\u5316\u6761\u4EF6\u3002\u53EA\u6709\u8C03\u7528\u4E86\u5DE5\u5177\uFF0C\u624D\u7B97\u67E5\u770B\u4E86\u8BB0\u5FC6\u3002`
             ].join("\n");
+            return escapePromptBraces(body);
           } catch (error) {
             logger.warn("short-term prompt failed", safeString(error));
             return "";
@@ -3768,7 +3774,7 @@ function apply(ctx, pluginConfig = {}) {
   try {
     disposeRecallTool = ctx.tools.register(
       defineTool({
-        name: pluginConfig.toolName ?? "autobiomemory_recall",
+        name: recallToolName,
         description: "\u56DE\u5FC6\u6211\u81EA\u5DF1\u7684\u8FC7\u5F80\u7ECF\u5386\uFF08\u7B2C\u4E00\u4EBA\u79F0\u4E8B\u4EF6\u65E5\u8BB0\uFF09\u3002\u7ED3\u5408\u5F53\u524D\u95EE\u9898\uFF0C\u5148\u6309\u7ED3\u6784\u5316\u6761\u4EF6\u7B5B\u9009\uFF0C\u518D\u505A\u5411\u91CF\u53EC\u56DE\u4E0E\u91CD\u6392\uFF0C\u8FD4\u56DE\u76F8\u5173\u65E5\u8BB0\u6B63\u6587\u53CA\u5176\u6765\u6E90\uFF08\u539F\u59CB\u4F1A\u8BDD\u6587\u4EF6\u4E0E\u8BB0\u5F55\u533A\u95F4\uFF09\u3002\u5F53\u7528\u6237\u95EE\u201C\u4E4B\u524D\u90A3\u6B21\u201D\u201C\u4E0A\u6B21\u6211\u4EEC\u600E\u4E48\u505A\u7684\u201D\u201C\u8FD8\u8BB0\u5F97\u5417\u201D\uFF0C\u6216\u9700\u8981\u590D\u7528\u8FC7\u53BB\u7684\u505A\u6CD5\u3001\u907F\u514D\u91CD\u590D\u8E29\u5751\u65F6\u8C03\u7528\u3002",
         parameters: {
           query: {
@@ -3890,7 +3896,7 @@ function apply(ctx, pluginConfig = {}) {
     logger.error("recall tool registration failed", safeString(error));
   }
   let disposeConsolidateTool;
-  const consolidateTool = pluginConfig.consolidateToolName ?? "";
+  const consolidateTool = pluginConfig.consolidateToolName ?? "autobiomemory_consolidate";
   if (consolidateTool !== "") {
     try {
       disposeConsolidateTool = ctx.tools.register(
@@ -4048,6 +4054,7 @@ export {
   encodeUnit,
   ensureConfig,
   ensureDataLayout,
+  escapePromptBraces,
   eventIdFor,
   eventIndexPath,
   eventPair,
