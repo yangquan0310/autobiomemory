@@ -29,7 +29,7 @@
 
 ```bash
 dsh plugin --profile web add \
-  "https://github.com/yangquan0310/autobiomemory/releases/download/v0.1.2/deepseek-harness-autobiomemory-0.1.2.tgz"
+  "https://github.com/yangquan0310/autobiomemory/releases/download/v0.2.0/autobiomemory-0.2.0.tgz"
 ```
 
 Release 里的 tgz 就是 `dist/` 打包产物（含预构建的 `dist/` 与 `cordis.patch.yml`），
@@ -41,7 +41,7 @@ Release 里的 tgz 就是 `dist/` 打包产物（含预构建的 `dist/` 与 `co
 dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.git#main"
 ```
 
-`dsh plugin` 会把包放进 profile 依赖，并**自动**把 `deepseek-harness-autobiomemory`
+`dsh plugin` 会把包放进 profile 依赖，并**自动**把 `autobiomemory`
 追加进 `dsh.profile.bundles`。仓库已把 4 个运行时产物提交进 git，所以 git 安装也不需要编译。
 想钉到某个提交就用 sha 代替 `#main`。
 
@@ -49,7 +49,7 @@ dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.
 
 ```bash
 pnpm run build && pnpm run pack:dist          # 产出 dist/package/ 与 dist/*.tgz
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.2.tgz"
+dsh plugin --profile web add "file:$PWD/dist/autobiomemory-0.2.0.tgz"
 ```
 
 ### C. 从源码开发
@@ -57,7 +57,7 @@ dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.
 ```bash
 git clone https://github.com/yangquan0310/autobiomemory.git && cd autobiomemory
 pnpm install && pnpm run check                # typecheck + 158 个测试 + build
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.2.tgz"
+dsh plugin --profile web add "file:$PWD/dist/autobiomemory-0.2.0.tgz"
 ```
 
 ### 初始化与自检（三种方式都一样）
@@ -87,7 +87,7 @@ autobiomemory recall "我来这里之后做了哪些事"
 - `consolidate --force` 从真实会话（4230 条记录 / 2.4MB）写出 **6 个事件**，0 失败，6 条向量
 - `recall "我为什么中断了那三个子代理？"` 四段流水线全命中（短时 6 / 结构化 6 / 向量 6 / rerank 6），
   rerank 把《我写文档、锁依赖版本，并中断停滞的子代理》排在第一位（0.46，其余 ≤0.20）
-- `plugin --profile web add` 后 `--dump-config` 可见 `deepseek-harness-autobiomemory` 层
+- `plugin --profile web add` 后 `--dump-config` 可见 `autobiomemory` 层
 
 ## 数据根目录
 
