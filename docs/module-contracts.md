@@ -33,6 +33,8 @@ export function beijingStamp(ms: number): string    // 2025-10-30 16:45:12 (北�
 export function truncate(text: string, max: number): string
 export function collapseWhitespace(text: string): string
 export function slugify(text: string, max?: number): string
+export const ZERO_WIDTH_SPACE: string                                        // U+200B
+export function neutralizeTemplateBraces(text: string): string              // idempotent; see below
 export function ensureDir(dir: string): void
 export function readJsonFile<T>(file: string): T | undefined                 // undefined on ENOENT/parse error
 export function writeJsonFile(file: string, value: unknown): void            // atomic, 2-space JSON + newline
@@ -43,6 +45,17 @@ export function isRecord(value: unknown): value is Record<string, unknown>
 export function asStringArray(value: unknown): string[]
 export class AbortError extends Error {}
 export function throwIfAborted(signal?: AbortSignal): void
+```
+
+`neutralizeTemplateBraces` inserts a U+200B between every pair of adjacent identical braces, so a
+`{{…}}`/`}}` token can no longer be recognised by a template engine while the text still reads
+identically. A single `{{`→`{␣{` pass is not enough (`{{{` becomes `{␣{{`, still containing `{{`), so
+the implementation inserts between *every* adjacent pair in one scan — the fixed point of that
+iteration. It is idempotent, and every byte it does not need to touch is unchanged. Two boundaries
+use it: storage (`buildRecord` / `writeEventPair`, see `src/store.ts`) and prompt rendering
+(`escapePromptBraces` in `src/plugin.ts`).
+
+```ts
 export function asyncPool<T, R>(items: T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]>
 ```
 
@@ -288,6 +301,7 @@ export function writeEventPair(paths: MemoryPaths, record: EventRecord): { jsonF
 export function listEventSummaries(paths: MemoryPaths, options?: { refresh?: boolean }): EventSummary[]
 export function eventIdFor(startedAt: string, contentHash: string): string      // ev_20251030T164512_ab12cd34
 export function buildRecord(encoded: EncodedEvent, options: { id: string; now?: string; revision?: number }): EventRecord
+export function neutralizeEventRecord(record: EventRecord): EventRecord
 export function shortTermMemory(paths: MemoryPaths, limit: number): { summaries: EventSummary[]; text: string }
 export function repairPairs(paths: MemoryPaths): { repaired: string[]; quarantined: string[]; skipped: string[] }
 export function eventIndexPath(paths: MemoryPaths): string
@@ -295,8 +309,17 @@ export function eventIndexPath(paths: MemoryPaths): string
 
 - `.md` contains exactly `record.diary` (trailing newline allowed). No front-matter, no title heading.
 - `writeEventPair` writes JSON first, then MD, both atomic; updates the event index
-  (`state/events-index.json`) in the same call; refuses to write when `record.diaryHash` does not
-  match `sha256(diary)`.
+  (`state/events-index.json`) in the same call; refuses to write when `record.diaryHash` matches
+  neither `sha256(record.diary)` nor `sha256` of the neutralised diary it is about to write.
+- **Braces never reach disk.** `buildRecord` and `writeEventPair` both run `neutralizeEventRecord`,
+  which applies `neutralizeTemplateBraces` to every model-authored text field (`title`, `diary`,
+  `scene.*`, `people[].name|role`, `goals`, `actions[].why|what|adjustment|result`,
+  `statements[].text`, `emotions[].who|emotion|evidence`, `outcome.summary|artifacts`, `tags`,
+  `keywords`, `entities`, `lessons`, `openQuestions`) and re-derives `diaryHash` from the diary that
+  is actually written. Provenance and identifiers — `id`, `sources` (session ids, paths, content
+  hashes, seq numbers, timestamps), `startedAt`/`endedAt`, `createdAt`/`updatedAt`, enum fields,
+  `revision` — are copied through untouched. The function is idempotent, so running it twice changes
+  no bytes, and a record that contains no brace pair is written byte-identically.
 - `listEventSummaries` trusts the index when `refresh` is false, otherwise rescans `events/` and
   reconciles it. Sorting: `occurredAt` descending.
 - `repairPairs` regenerates a missing `.md` from the JSON's `diary`, re-serialises a JSON whose
