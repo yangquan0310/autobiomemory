@@ -90,6 +90,42 @@ export function slugify(text: string, max = 60): string {
   return truncate(cleaned, max)
 }
 
+/** Zero-width space (U+200B): invisible to a reader, fatal to a `{{` scanner. */
+export const ZERO_WIDTH_SPACE = '\u200b'
+
+/**
+ * Neutralise every run of adjacent `{`/`}` so no text can be read as a template reference.
+ *
+ * Memory bodies are arbitrary prose produced by a language model, so they can legitimately contain
+ * `{{variable}}`, `{{{`, `}}}}` and similar. Any consumer that hands that text to a template engine
+ * (dsh's system-prompt interpolation is one) would either substitute a registered variable into the
+ * agent's own memory or throw on an unknown one. Inserting a zero-width space between adjacent
+ * braces removes the `{{`/`}}` token while keeping the text visually identical.
+ *
+ * A single pass of `{{`→`{␣{` is **not** enough: it turns `{{{` into `{␣{{`, which still contains a
+ * bare `{{`, so a naive implementation needs to iterate. This scanner inserts a separator between
+ * *every* adjacent identical brace, which is exactly that fixed point in one pass.
+ *
+ * Idempotent: once no two adjacent braces remain, a second call returns the same string, so the
+ * function can be applied at several boundaries without piling up zero-width spaces.
+ *
+ * @param text - any text, typically model-authored prose.
+ * @returns the same text with every adjacent identical brace separated; otherwise byte-identical.
+ */
+export function neutralizeTemplateBraces(text: string): string {
+  // Fast path: nothing any brace scanner could match.
+  if (!text.includes('{{') && !text.includes('}}')) return text
+  const out: string[] = []
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text.charAt(i)
+    out.push(char)
+    if ((char === '{' || char === '}') && text.charAt(i + 1) === char) {
+      out.push(ZERO_WIDTH_SPACE)
+    }
+  }
+  return out.join('')
+}
+
 export function ensureDir(dir: string): void {
   fs.mkdirSync(dir, { recursive: true })
 }

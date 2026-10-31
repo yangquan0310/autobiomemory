@@ -76,6 +76,7 @@ export {
   eventIdFor,
   eventIndexPath,
   listEventSummaries,
+  neutralizeEventRecord,
   readDiary,
   readEvent,
   repairPairs,
@@ -83,6 +84,10 @@ export {
   writeEventPair,
 } from './store.js'
 export type { EventSummary } from './store.js'
+
+// Prompt- and storage-independent text hygiene: any consumer that moves memory text into a
+// template system should route it through this first.
+export { neutralizeTemplateBraces, ZERO_WIDTH_SPACE } from './util.js'
 
 export {
   VectorStore,
