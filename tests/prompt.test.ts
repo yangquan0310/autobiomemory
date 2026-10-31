@@ -66,7 +66,7 @@ const goodPayload = {
     outcome: { status: 'partial', summary: '安装完成，待重启验证', artifacts: ['dist/x.tgz'] },
     tags: ['部署'],
     keywords: ['dsh plugin add'],
-    entities: ['deepseek-harness-autobiomemory'],
+    entities: ['autobiomemory'],
     lessons: ['安装后需重启'],
     openQuestions: ['谁来重启'],
   },
