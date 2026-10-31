@@ -29,11 +29,14 @@ export {
 
 export {
   clearFailure,
+  dueFailures,
   failureKey,
   getSessionCursor,
   isCoolingDown,
   loadCursor,
   loadRunState,
+  notYetDueFailures,
+  // Deprecated alias of dueFailures(); prefer the explicit names above.
   pendingFailures,
   putSessionCursor,
   recordFailure,
