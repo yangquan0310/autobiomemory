@@ -141,14 +141,45 @@ export function isCoolingDown(state: RunState, cooldownMs: number, nowMs = Date.
   return nowMs - last < cooldownMs
 }
 
-/** Failures whose backoff has elapsed, oldest first. */
-export function pendingFailures(state: RunState, nowMs = Date.now()): FailureEntry[] {
+/**
+ * Failures whose backoff has **elapsed**: they are due and must be retried by this run.
+ *
+ * A `nextAttemptAt` that cannot be parsed counts as due, so one corrupt timestamp can never
+ * wedge a session into permanent backoff.
+ */
+export function dueFailures(state: RunState, nowMs = Date.now()): FailureEntry[] {
   return Object.values(state.failures)
     .filter((entry) => {
       const due = Date.parse(entry.nextAttemptAt)
       return Number.isNaN(due) || due <= nowMs
     })
     .sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt))
+}
+
+/**
+ * Failures still inside their backoff window: this run must **leave them alone** because their
+ * `nextAttemptAt` is in the future.
+ *
+ * This is the set a caller uses to *skip* work; its complement ({@link dueFailures}) is the set a
+ * caller uses to *do* work. Treating the due set as a skip list is exactly the inversion that made
+ * every expired failure retry forever-never.
+ */
+export function notYetDueFailures(state: RunState, nowMs = Date.now()): FailureEntry[] {
+  return Object.values(state.failures)
+    .filter((entry) => {
+      const due = Date.parse(entry.nextAttemptAt)
+      return !Number.isNaN(due) && due > nowMs
+    })
+    .sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt))
+}
+
+/**
+ * @deprecated Ambiguous: "pending" reads like "outstanding, therefore skip it", which is the
+ * opposite of this function's meaning. Use {@link dueFailures} to decide what to retry and
+ * {@link notYetDueFailures} to decide what to skip.
+ */
+export function pendingFailures(state: RunState, nowMs = Date.now()): FailureEntry[] {
+  return dueFailures(state, nowMs)
 }
 
 export { nowIso }

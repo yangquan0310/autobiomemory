@@ -33,12 +33,13 @@ import {
   clearFailure,
   clearSkipped,
   failureAttempts,
+  failureKey,
   getSessionCursor,
   isCoolingDown,
   isSkipped,
   loadCursor,
   loadRunState,
-  pendingFailures,
+  notYetDueFailures,
   putSessionCursor,
   recordFailure,
   recordSkipped,
@@ -261,7 +262,24 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
   const cursorState = loadCursor(paths)
   const spanState = loadSpans(paths)
   const store = input.dryRun ? undefined : new VectorStore(paths.vectorDb)
-  const failedTargets = new Set(pendingFailures(runState).map((entry) => entry.target))
+  // Only failures still *inside* their backoff window are skipped. A failure whose
+  // `nextAttemptAt` has passed is due and must flow through the normal read → encode path again;
+  // treating the due set as a skip list is what made expired failures retry forever-never, which
+  // in turn kept `attempts` stuck at 1 and disabled the poison-span give-up below.
+  const backingOff = new Map(
+    notYetDueFailures(runState)
+      .filter((entry) => entry.kind === 'consolidate')
+      .map((entry) => [entry.target, entry] as const),
+  )
+  /**
+   * Forget a session's consolidation failure once this run got through it without a new one, so
+   * the entry (and its `attempts`, which feeds the poison-span threshold) stops lingering.
+   */
+  const leaveBackoff = (target: string): void => {
+    if (runState.failures[failureKey('consolidate', target)] === undefined) return
+    clearFailure(runState, 'consolidate', target)
+    if (!input.dryRun) saveRunState(paths, runState)
+  }
   /** Events whose embedding was already attempted in this run (success or not). */
   const attemptedEmbed = new Set<string>()
   let budget = Math.max(1, config.consolidation.maxEventsPerRun)
@@ -276,10 +294,16 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
       if (budget <= 0) break
 
       result.sessionsScanned += 1
-      if (failedTargets.has(file) && !input.force) {
-        result.details.push(`跳过（失败退避中）：${sessionLabel(file)}`)
+      const backoff = backingOff.get(file)
+      if (backoff !== undefined && !input.force) {
+        result.details.push(
+          `跳过（失败退避中，${backoff.nextAttemptAt} 重试）：${sessionLabel(file)}`,
+        )
         continue
       }
+      // Whether this session failed again in *this* run: a retried session that made it through
+      // leaves the failure queue, so `attempts` only ever counts consecutive failures.
+      let failedThisSession = false
 
       let transcript: SessionTranscript
       try {
@@ -287,11 +311,17 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         recordFailure(runState, 'consolidate', file, error)
+        failedThisSession = true
         result.eventsFailed += 1
         result.details.push(`读取失败：${sessionLabel(file)} — ${message}`)
         continue
       }
-      if (transcript.records.length === 0) continue
+      if (transcript.records.length === 0) {
+        // Nothing could have failed yet in this iteration: reading an empty transcript is a
+        // successful retry, so the session leaves the backoff queue.
+        leaveBackoff(file)
+        continue
+      }
 
       let previous = getSessionCursor(cursorState, transcript.sessionFile)
       if (previous && transcript.fileSize < previous.fileSize) {
@@ -303,6 +333,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
       const pending = pendingRecords(transcript, previous)
       if (pending.length === 0) {
         caughtUpSessions += 1
+        leaveBackoff(file)
         continue
       }
 
@@ -350,6 +381,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           const failure = recordFailure(runState, 'consolidate', file, error)
+          failedThisSession = true
           result.eventsFailed += 1
           result.details.push(`编码失败：${summarizeUnit(unit)} — ${message}`)
 
@@ -401,6 +433,7 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           recordFailure(runState, 'store', eventId, error)
+          failedThisSession = true
           result.eventsFailed += 1
           result.details.push(`存储失败：${eventId} — ${message}`)
           saveRunState(paths, runState)
@@ -437,8 +470,8 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
         putSessionCursor(cursorState, cursorFor(transcript, unit, previous))
         saveCursor(paths, cursorState)
         saveSpans(paths, spanState)
-        saveRunState(paths, runState)
         clearFailure(runState, 'consolidate', file)
+        saveRunState(paths, runState)
       }
 
       if (units.length === 0 && pending.length > options.tailRecords) {
@@ -460,6 +493,9 @@ export async function consolidate(input: ConsolidateDeps): Promise<Consolidation
           saveCursor(paths, cursorState)
         }
       }
+
+      // The session was retried and nothing failed this run: it is no longer backing off.
+      if (!failedThisSession) leaveBackoff(file)
     }
 
     // --- stale / missing vector sweep (failure continuation) ---

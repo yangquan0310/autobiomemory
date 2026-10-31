@@ -16,11 +16,13 @@ import {
 import { memoryPaths } from '../src/paths.js'
 import {
   clearFailure,
+  dueFailures,
   failureKey,
   getSessionCursor,
   isCoolingDown,
   loadCursor,
   loadRunState,
+  notYetDueFailures,
   pendingFailures,
   putSessionCursor,
   recordFailure,
@@ -245,7 +247,13 @@ describe('state', () => {
     ensureDataLayout(paths)
     const state = loadRunState(paths)
     recordFailure(state, 'embed', 'ev_1', new Error('x'), { retryDelayMs: 1000 })
-    expect(pendingFailures(state, Date.now())).toHaveLength(0)
+    // due = "retry now", notYetDue = "leave alone": the two sets must be exact complements,
+    // because using the due set as a skip list is what once deadlocked every retry.
+    expect(dueFailures(state, Date.now())).toHaveLength(0)
+    expect(notYetDueFailures(state, Date.now())).toHaveLength(1)
+    expect(dueFailures(state, Date.now() + 5000)).toHaveLength(1)
+    expect(notYetDueFailures(state, Date.now() + 5000)).toHaveLength(0)
+    // the old name is kept as a deprecated alias of dueFailures()
     expect(pendingFailures(state, Date.now() + 5000)).toHaveLength(1)
     saveRunState(paths, state)
     const reloaded = loadRunState(paths)
