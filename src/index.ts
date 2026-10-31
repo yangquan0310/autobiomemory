@@ -5,7 +5,7 @@
  * Everything else is exported so the CLI, tests and other plugins can drive the loop directly.
  */
 
-export { name, inject, Config, apply, default } from './plugin.js'
+export { name, inject, Config, apply, escapePromptBraces, default } from './plugin.js'
 export type { PluginConfig } from './plugin.js'
 
 export * from './types.js'
