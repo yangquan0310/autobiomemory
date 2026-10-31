@@ -3,6 +3,60 @@
 All notable changes to AutoBioMemory. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versions follow the package version.
 
+## [0.2.2] — 2026-10-31
+
+### Fixed
+
+- **Stored events can no longer contain a template-brace pair.** The diary and every model-authored
+  structured field are arbitrary prose written by a language model, so they can quote `{{variable}}`,
+  `{{{` or `}}}}`. Two things went wrong downstream: a consumer that renders the text through a
+  template engine aborted with `unknown prompt variable "…"` — which failed dsh's entire prompt
+  assembly, not just the memory digest — and, **worse and silently**, a *registered* name was
+  substituted, so `{{model}}` / `{{cwd}}` were replaced by their values and the agent's own memory
+  was rewritten on the way into the prompt. `escapePromptBraces` (0.1.3) only defused the prompt
+  boundary; anything else reading `events/*.md` or `structured` — another plugin, a script, a future
+  consumer — still hit the same trap. Neutralisation now happens on the way to disk, so every
+  consumer is safe by construction.
+
+  `neutralizeTemplateBraces()` inserts a zero-width space (U+200B) between adjacent braces, which
+  leaves the text visually identical while removing the `{{`/`}}` token. A single `{{` → `{␣{` pass
+  is *not* enough — it turns `{{{` into `{␣{{`, still containing a bare `{{` (that is how the
+  one-off data sweep needed two rounds) — so the implementation inserts between every adjacent pair
+  in one scan, which is that iteration's fixed point. It is idempotent: neutralising twice changes no
+  bytes, and a record with no brace pair is written byte-identically.
+
+  `buildRecord` neutralises before the hash is computed, so `diaryHash` describes exactly the diary
+  that is written; `.md` is byte-identical to that diary, and the vector `text_hash` matches it, so
+  recall freshness tracking stays correct. `writeEventPair` applies the same neutralisation as a
+  safety net for writers that bypass `buildRecord`, and re-derives the hash from what it writes.
+
+  Untouched by design: `id`, `sources` (session ids, paths, content hashes, seq numbers, timestamps),
+  `startedAt`/`endedAt`, `createdAt`/`updatedAt`, enum fields (`status`, `kind`, `basis`), `revision`,
+  and the entire data-root layout. Provenance is evidence, not prose — rewriting a content hash would
+  break dedupe.
+
+- **The encoder is asked to avoid brace pairs in the first place.** The encoding guide and the
+  response contract now require describing template examples in words instead of emitting literal
+  `{{…}}`. That reduces needless neutralisation; it is a soft constraint, which is why storage still
+  enforces it.
+
+Historical data: events written before this release were swept once on the install side — all
+`events/*.md` and the text fields of `events/*.json` now contain no bare braces, with `diaryHash`,
+JSON/MD pairing and vector `text_hash` all consistent, and backups under
+`~/.autobiomemory-brace-sweep-*` kept. Nothing in this release re-processes them; the guarantee here
+covers everything written from now on.
+
+### Tests
+
+- New `tests/storage-braces.test.ts` (7 tests, 179 → 186): a fixture with `{{a}}`, `{{{`, `}}}}` and
+  cross-field mixes in every prose field is written through `buildRecord` + `writeEventPair` and must
+  produce an `.md`/`.json` pair with no recognisable brace pair; `diaryHash === sha256(diary)`,
+  `.md === diary`, and the vector row's `text_hash` equals the same hash end to end. It also pins
+  idempotency (a second neutralisation changes nothing and no double zero-width spaces appear), that
+  provenance/identifiers stay byte-identical even when they do contain braces, that the `{{{` case
+  resolves to a fixed point, and that a hand-built record bypassing `buildRecord` is still
+  neutralised on write. Turning the helper into a no-op fails 4 of them.
+
 ## [0.2.1] — 2026-10-31
 
 ### Fixed
