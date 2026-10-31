@@ -10,7 +10,7 @@
 #       autoConsolidate: false
 - insert:
     - id: autobiomemory
-      name: deepseek-harness-autobiomemory
+      name: autobiomemory
       config:
         # Data root; defaults to $DSH_AUTOBIO_ROOT or ~/.autobiomemory
         dataRoot: !!js process.env.DSH_AUTOBIO_ROOT ?? undefined

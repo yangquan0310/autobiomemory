@@ -6,10 +6,10 @@
  *
  * Produces:
  *   dist/package/                              an installable package directory
- *   dist/deepseek-harness-autobiomemory-<v>.tgz  the same package as a tarball
+ *   dist/autobiomemory-<v>.tgz  the same package as a tarball
  *
  * The docker/no-network install path is:
- *   dsh plugin --profile web add "file:<repo>/dist/deepseek-harness-autobiomemory-0.1.0.tgz"
+ *   dsh plugin --profile web add "file:<repo>/dist/autobiomemory-0.2.0.tgz"
  */
 
 import { execFileSync } from 'node:child_process'

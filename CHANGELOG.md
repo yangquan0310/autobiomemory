@@ -3,6 +3,34 @@
 All notable changes to AutoBioMemory. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versions follow the package version.
 
+## [0.2.0] — 2026-10-31
+
+### Breaking
+
+- **The package is now published as `autobiomemory`** (it was
+  `deepseek-harness-autobiomemory`), matching its sibling `autoschema`. The published name is what a
+  profile stores, so **an existing install must be migrated by hand** — adding the new name on top
+  of the old one leaves a `dsh.profile.bundles` entry that no longer resolves.
+
+  ```bash
+  # 1. remove the old dependency (this also drops its `dsh.profile.bundles` entry)
+  dsh plugin --profile <profile> remove deepseek-harness-autobiomemory
+  # 2. add the new package: registry-style, git, or a release tarball
+  dsh plugin --profile <profile> add "file:<path>/autobiomemory-0.2.0.tgz"
+  # 3. restart the profile process — the bundle layer is read at startup
+  ```
+
+  `dsh.profile.bundles` must then contain `autobiomemory` and no longer mention the old name. The
+  data root (`~/.autobiomemory/`), `events/*.json`, `events/*.md`, the vector index, `config.json`
+  and `.env` are untouched, so memories carry over unchanged — nothing to re-encode. The plugin's
+  runtime id, the composition row id (`id: autobiomemory`) and the `autobiomemory` bin were already
+  named `autobiomemory`, so no composed profile tree changes shape.
+
+### Changed
+
+- Release assets are now named `autobiomemory-<version>.tgz`, and the install commands in the
+  README, the operations manual and `AGENTS.md` use the new name.
+
 ## [0.1.3] — 2026-10-31
 
 ### Fixed
