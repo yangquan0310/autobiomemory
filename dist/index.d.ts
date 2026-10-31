@@ -633,8 +633,9 @@ declare function pendingFailures(state: RunState, nowMs?: number): FailureEntry[
 /**
  * AutoBioMemory — raw session transcripts, read in place.
  *
- * dsh appends one **independent zstd frame per write** to `session.jsonl.zstd`
- * (live files on this machine carry thousands of them), and `zlib.zstdDecompressSync`
+ * dsh appends one **independent zstd frame per write** to the transcript file
+ * (`session.v4.jsonl.zstd` on dsh 0.2.x, `session.jsonl.zstd` on older builds; live
+ * files on this machine carry thousands of frames), and `zlib.zstdDecompressSync`
  * decodes only the first frame. So we walk the concatenated frame headers ourselves:
  * magic → frame header → blocks → optional checksum trailer, decompressing each frame
  * separately and concatenating the payloads.
@@ -657,7 +658,8 @@ interface DecodedFrames {
 declare function decodeZstdFrames(buffer: Buffer): DecodedFrames;
 /** Enumerate session transcripts under the configured directories. */
 declare function listSessionFiles(readDirs: string[], includeGlobs?: string[], excludeGlobs?: string[]): string[];
-/** `…/agentchat-web-v1-<id>/session.jsonl.zstd` → the directory name, else the file stem. */
+/** `…/agentchat-web-v1-<id>/session.jsonl.zstd` → the directory name, else the file stem.
+ *  The stem fallback also covers versioned transcripts such as `session.v4.jsonl.zstd`. */
 declare function sessionIdFromPath(file: string): string;
 /**
  * Map dsh session event-log lines onto `RawRecord[]`.

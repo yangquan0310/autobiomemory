@@ -29,7 +29,7 @@
 
 ```bash
 dsh plugin --profile web add \
-  "https://github.com/yangquan0310/autobiomemory/releases/download/v0.1.1/deepseek-harness-autobiomemory-0.1.1.tgz"
+  "https://github.com/yangquan0310/autobiomemory/releases/download/v0.1.2/deepseek-harness-autobiomemory-0.1.2.tgz"
 ```
 
 Release 里的 tgz 就是 `dist/` 打包产物（含预构建的 `dist/` 与 `cordis.patch.yml`），
@@ -49,7 +49,7 @@ dsh plugin --profile web add "git+https://github.com/yangquan0310/autobiomemory.
 
 ```bash
 pnpm run build && pnpm run pack:dist          # 产出 dist/package/ 与 dist/*.tgz
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.2.tgz"
 ```
 
 ### C. 从源码开发
@@ -57,7 +57,7 @@ dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.
 ```bash
 git clone https://github.com/yangquan0310/autobiomemory.git && cd autobiomemory
 pnpm install && pnpm run check                # typecheck + 158 个测试 + build
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.2.tgz"
 ```
 
 ### 初始化与自检（三种方式都一样）

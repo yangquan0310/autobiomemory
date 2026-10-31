@@ -95,11 +95,35 @@ git checkout alpha && git merge --no-ff feat/core feat/session ...
 # 打包
 git checkout beta && pnpm run check && pnpm run build && pnpm run pack:dist
 
-# 从 dist 安装插件
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-0.1.1.tgz"
+# 从 dist 安装插件（<version> 取 package.json 的 version）
+dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-<version>.tgz"
 ```
 
 安装后**必须重启 profile 进程**（`dsh web`）才会加载新的 bundle 层。
+
+## 发布流程（通用六步）
+
+每次发布都按这六步走；`X.Y.Z` 是本次要发布的版本号，**不要**在文档、脚本或提交信息里写死具体版本。
+
+1. **开分支**：从 `main` 切 `fix/<主题>`（缺陷）或 `feat/<模块>`（功能）。
+2. **实现 + 回归测试**：修缺陷必须带能复现原问题的测试；本地 `pnpm run typecheck && pnpm run test` 全绿，
+   既有测试数不得下降（只允许增加）。**不要**为了让测试变绿去改 `types.ts` / `constants.ts` 的既有语义。
+3. **进集成**：合并进 `alpha`，跑全量 `pnpm run check`（typecheck + test + build）。
+4. **打包**：合并 `alpha` → `beta`，`pnpm run build && pnpm run pack:dist`；把 `package.json` 的 `version`
+   升到 `X.Y.Z`，在 `CHANGELOG.md` 写清根因、修法与影响面（面向使用者，不写内部流水账）。
+5. **发布**：打 tag `vX.Y.Z`，推送所有相关分支与 tag，创建 GitHub Release 并把 `dist/*.tgz` 作为资产上传。
+6. **从产物验证一次**（唯一可信的验收）：下载 Release 里的 tgz →
+   `dsh plugin --profile <临时profile> add "file:<tgz>"` →
+   确认 `dsh.profile.bundles` 里出现 `deepseek-harness-autobiomemory` →
+   `--dump-config` 能看到该层。
+
+打包两条硬约束，缺一条 dsh 就装不对：
+
+- 产物 tgz 必须**包含 `cordis.patch.yml`**（`package.json` 的 `files` 里已列出，改动别删）；
+- `package.json` 必须带 **`dsh.bundle.patch`** 字段——没有它 dsh 只会把它当普通依赖安装，不会插进 profile 层；
+  有它但 patch 文件缺失则报 invalid plugin。
+
+装完必须**重启 profile 进程**才生效，不要在文档或脚本里假设热加载。
 
 ## 验证
 

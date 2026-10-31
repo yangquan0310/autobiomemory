@@ -52,6 +52,40 @@ export const name = 'autobiomemory'
 /** Services this plugin needs; it stays unloaded in profiles that lack them. */
 export const inject = ['tools', 'systemPrompt']
 
+/** Zero-width space (U+200B): invisible to the model and to a human reader. */
+const ZWSP = '\u200b'
+
+/**
+ * Defuse `{{…}}` before diary text is handed to the harness.
+ *
+ * `ctx.systemPrompt.section()` text is not literal prose from the harness's point of view: the
+ * system-prompt service interpolates every `{{name}}` group it finds and *throws* when the name is
+ * not a registered variable (`unknown prompt variable "{{variable}}" in section "…"`), which fails
+ * the whole prompt assembly. Diary bodies are DeepSeek's transcription of raw transcripts, so they
+ * legitimately contain literal `{{…}}` — for example when the agent explained prompt variables to
+ * the user. A zero-width space between the two braces keeps the text verbatim for readers
+ * (human and model) while making the interpolator's `{{` scan fail to match.
+ *
+ * Only the *memory → prompt* boundary escapes. Stored events (`events/*.json`, `events/*.md`) stay
+ * byte-identical to what was encoded, so `diaryHash` and the vector index are unaffected.
+ *
+ * @param text - prompt-bound text that may contain literal braces.
+ * @returns the same text with every run of adjacent `{`/`}` separated; idempotent.
+ */
+export function escapePromptBraces(text: string): string {
+  // Fast path: nothing the interpolator could match.
+  if (!text.includes('{{') && !text.includes('}}')) return text
+  const out: string[] = []
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text.charAt(i)
+    out.push(char)
+    // Separate every adjacent identical brace, not just the first pair of a run: `{{{` must not
+    // leave a recognisable `{{` behind.
+    if ((char === '{' || char === '}') && text.charAt(i + 1) === char) out.push(ZWSP)
+  }
+  return out.join('')
+}
+
 export interface PluginConfig {
   /** Data root; defaults to `~/.autobiomemory`. */
   dataRoot?: string
@@ -200,6 +234,9 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
   )
 
   // ---------------------------------------------------------------- prompts
+  // Resolve names once: the section text interpolates the recall tool name, and dsh renders that
+  // string as a prompt *template*, so it must be the same default the tool registration uses.
+  const recallToolName = pluginConfig.toolName ?? 'autobiomemory_recall'
   let disposePrompt = () => {}
   if (pluginConfig.shortTermInPrompt !== false) {
     try {
@@ -209,27 +246,29 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
         text: () => {
           try {
             const memory = shortTermMemory(runtime.paths, config.consolidation.recentEventLimit)
-            if (memory.summaries.length === 0) {
-              return [
-                '## 自传体记忆（AutoBioMemory）',
-                '我还没有任何已编码的经历。当我完成一段值得记住的工作后，可以用 `' +
-                  pluginConfig.toolName +
-                  '` 之外的整理机制补记；平时不必提及此机制。',
-              ].join('\n')
-            }
-            const digest = truncate(
-              memory.text,
-              pluginConfig.shortTermPromptChars ?? 2400,
-            )
-            return [
-              '## 自传体记忆（AutoBioMemory · 短时记忆）',
-              '以下是我最近亲身经历的事件日记，按时间倒序。它们是我的记忆，不是用户提供的信息。',
-              '',
-              digest,
-              '',
-              `需要更早或更具体的经历时，调用 \`${pluginConfig.toolName}\`，用自然语言描述"我要回忆什么"，` +
-                '可附带 since/until/people/tags/status 等结构化条件。只有调用了工具，才算查看了记忆。',
-            ].join('\n')
+            const body =
+              memory.summaries.length === 0
+                ? [
+                    '## 自传体记忆（AutoBioMemory）',
+                    '我还没有任何已编码的经历。当我完成一段值得记住的工作后，可以用 `' +
+                      recallToolName +
+                      '` 之外的整理机制补记；平时不必提及此机制。',
+                  ].join('\n')
+                : [
+                    '## 自传体记忆（AutoBioMemory · 短时记忆）',
+                    '以下是我最近亲身经历的事件日记，按时间倒序。它们是我的记忆，不是用户提供的信息。',
+                    '',
+                    truncate(memory.text, pluginConfig.shortTermPromptChars ?? 2400),
+                    '',
+                    `需要更早或更具体的经历时，调用 \`${recallToolName}\`，用自然语言描述"我要回忆什么"，` +
+                      '可附带 since/until/people/tags/status 等结构化条件。只有调用了工具，才算查看了记忆。',
+                  ].join('\n')
+            // The single escape point between memory and prompt: diary bodies and event titles are
+            // arbitrary DeepSeek prose and may contain literal `{{…}}`, which dsh's prompt
+            // interpolator would either substitute or reject as an unknown variable. Escaping the
+            // composed text also covers a `{` at the end of one part meeting a `{` at the start of
+            // the next, and any future structured-field rendering added here.
+            return escapePromptBraces(body)
           } catch (error) {
             logger.warn('short-term prompt failed', safeString(error))
             return ''
@@ -242,11 +281,14 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
   }
 
   // ------------------------------------------------------------------ tools
+  // Tool descriptions are static strings with no `{{`, which is required: dsh renders tool schemas
+  // outside the prompt interpolator, but keeping them brace-free avoids storing the same trap in
+  // two places.
   let disposeRecallTool: (() => void) | undefined
   try {
     disposeRecallTool = ctx.tools.register(
       defineTool({
-        name: pluginConfig.toolName ?? 'autobiomemory_recall',
+        name: recallToolName,
         description:
           '回忆我自己的过往经历（第一人称事件日记）。结合当前问题，先按结构化条件筛选，再做向量召回与重排，' +
           '返回相关日记正文及其来源（原始会话文件与记录区间）。当用户问“之前那次”“上次我们怎么做的”“还记得吗”，' +
@@ -376,7 +418,9 @@ export function apply(ctx: Context, pluginConfig: PluginConfig = {}): void {
   }
 
   let disposeConsolidateTool: (() => void) | undefined
-  const consolidateTool = pluginConfig.consolidateToolName ?? ''
+  // `''` disables the tool; anything else (including the schema default) registers it, so a caller
+  // that invokes `apply()` without schema validation still gets the documented surface.
+  const consolidateTool = pluginConfig.consolidateToolName ?? 'autobiomemory_consolidate'
   if (consolidateTool !== '') {
     try {
       disposeConsolidateTool = ctx.tools.register(
