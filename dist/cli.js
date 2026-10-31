@@ -95,6 +95,19 @@ function truncate(text, max) {
 function collapseWhitespace(text) {
   return text.replace(/\s+/gu, " ").trim();
 }
+var ZERO_WIDTH_SPACE = "\u200B";
+function neutralizeTemplateBraces(text) {
+  if (!text.includes("{{") && !text.includes("}}")) return text;
+  const out = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text.charAt(i);
+    out.push(char);
+    if ((char === "{" || char === "}") && text.charAt(i + 1) === char) {
+      out.push(ZERO_WIDTH_SPACE);
+    }
+  }
+  return out.join("");
+}
 function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
@@ -1095,6 +1108,15 @@ var ENCODING_GUIDE = `\u4F60\u662F\u6211\u7684\u81EA\u4F20\u4F53\u8BB0\u5FC6\u7F
 - \u4E0D\u8981\u7528 Markdown \u6807\u9898\u3001\u4E0D\u8981\u7528\u9879\u76EE\u7B26\u53F7\u5217\u8868\u3001\u4E0D\u8981\u8D34\u547D\u4EE4\u539F\u6587\u957F\u4E32\u3002
 - \u65E5\u8BB0\u8981\u80FD\u72EC\u7ACB\u8BFB\u61C2\uFF1A\u5373\u4F7F\u4E0D\u770B\u6211\u5F53\u65F6\u7684\u4F1A\u8BDD\uFF0C\u4E5F\u80FD\u660E\u767D\u53D1\u751F\u4E86\u4EC0\u4E48\u3002
 
+## \u5B57\u9762\u91CF\u5927\u62EC\u53F7
+
+- \u4E0D\u8981\u5728\u4EFB\u4F55\u5B57\u6BB5\u91CC\u8F93\u51FA\u8FDE\u7EED\u7684\u6210\u5BF9\u82B1\u62EC\u53F7\uFF08\u5373\u300C\u4E24\u4E2A\u5DE6\u82B1\u62EC\u53F7 + \u53D8\u91CF\u540D + \u4E24\u4E2A\u53F3\u82B1\u62EC\u53F7\u300D\u90A3\u79CD\u5199\u6CD5\uFF09\uFF1A
+  \u6211\u7684\u8BB0\u5FC6\u4F1A\u88AB\u62FC\u8FDB\u63D0\u793A\u8BCD\u6A21\u677F\uFF0C\u8FD9\u79CD\u5199\u6CD5\u4F1A\u88AB\u5F53\u6210\u6A21\u677F\u53D8\u91CF\u2014\u2014\u672A\u6CE8\u518C\u7684\u53D8\u91CF\u4F1A\u8BA9\u6574\u6BB5\u63D0\u793A\u8BCD\u88C5\u914D\u5931\u8D25\uFF0C
+  \u5DF2\u6CE8\u518C\u7684\uFF08\u5982 model\u3001cwd\uFF09\u66F4\u7CDF\uFF0C\u4F1A\u88AB\u9759\u9ED8\u66FF\u6362\u6210\u5B9E\u9645\u503C\uFF0C\u7B49\u4E8E\u7BE1\u6539\u6211\u81EA\u5DF1\u7684\u8BB0\u5FC6\u3002
+- \u9700\u8981\u4E3E\u4F8B\u8BF4\u660E\u6A21\u677F\u3001\u53D8\u91CF\u3001\u5360\u4F4D\u7B26\u65F6\uFF0C\u7528\u6587\u5B57\u63CF\u8FF0\u4EE3\u66FF\uFF08\u4F8B\u5982\u300C\u4E24\u4E2A\u5DE6\u82B1\u62EC\u53F7\u52A0\u53D8\u91CF\u540D\u300D\uFF09\uFF0C
+  \u4E0D\u8981\u771F\u7684\u5199\u51FA\u8FDE\u7EED\u7684\u5DE6\u82B1\u62EC\u53F7\u6216\u53F3\u82B1\u62EC\u53F7\u3002
+- \u5F15\u7528\u4EE3\u7801\u6216\u914D\u7F6E\u91CC\u7684\u82B1\u62EC\u53F7\u540C\u7406\uFF1A\u80FD\u7701\u7565\u5C31\u7701\u7565\uFF0C\u5FC5\u987B\u63D0\u5230\u65F6\u6309\u4E0A\u9762\u7684\u5199\u6CD5\u63CF\u8FF0\u3002
+
 ## \u8F93\u51FA
 
 \u53EA\u8F93\u51FA\u4E00\u4E2A JSON \u5BF9\u8C61\uFF08\u9876\u5C42\u53EA\u6709 structured \u4E0E diary \u4E24\u4E2A\u952E\uFF09\uFF0C\u4E0D\u8981 markdown \u4EE3\u7801\u5757\uFF0C\u4E0D\u8981\u89E3\u91CA\u3002`;
@@ -1139,6 +1161,7 @@ var RESPONSE_CONTRACT = `## \u54CD\u5E94\u5951\u7EA6
 }
 
 \u7EA6\u675F\uFF1A
+- \u4EFB\u4F55\u5B57\u6BB5\u90FD\u4E0D\u8981\u51FA\u73B0\u8FDE\u7EED\u7684\u6210\u5BF9\u82B1\u62EC\u53F7\uFF1A\u90A3\u662F\u63D0\u793A\u8BCD\u6A21\u677F\u7684\u53D8\u91CF\u6807\u8BB0\uFF0C\u4F1A\u88AB\u63D2\u503C\u6216\u5BFC\u81F4\u88C5\u914D\u5931\u8D25\u3002
 - status \u53EA\u80FD\u53D6 completed / partial / failed / ongoing / planned \u4E4B\u4E00\uFF0C\u5E76\u4E0E\u6B63\u6587\u4E00\u81F4\u3002
 - statements \u91CC\u5FC5\u987B\u660E\u786E\u533A\u5206 fact / inference / plan / completion\u3002
 - emotions \u6CA1\u6709\u4F9D\u636E\u5C31\u4E0D\u5199\uFF1B\u5199\u4E86\u5C31\u5FC5\u987B\u6709 evidence \u4E0E basis\u3002
@@ -1870,6 +1893,86 @@ function mdTextFor(diary) {
 function normalizeDiary(diary) {
   return diary.replace(/(?:\r?\n)+$/u, "");
 }
+function braceSafe(value) {
+  return neutralizeTemplateBraces(value);
+}
+function braceSafeList(values) {
+  return (values ?? []).map((value) => braceSafe(value));
+}
+function braceSafeScene(scene) {
+  const copy = { ...scene };
+  if (typeof copy.cwd === "string") copy.cwd = braceSafe(copy.cwd);
+  if (typeof copy.project === "string") copy.project = braceSafe(copy.project);
+  if (typeof copy.place === "string") copy.place = braceSafe(copy.place);
+  if (typeof copy.channel === "string") copy.channel = braceSafe(copy.channel);
+  if (typeof copy.localTime === "string") copy.localTime = braceSafe(copy.localTime);
+  return copy;
+}
+function braceSafePeople(people) {
+  return (people ?? []).map((person) => ({
+    ...person,
+    name: braceSafe(person.name),
+    ...person.role === void 0 ? {} : { role: braceSafe(person.role) }
+  }));
+}
+function braceSafeActions(actions) {
+  return (actions ?? []).map((action) => ({
+    ...action,
+    what: braceSafe(action.what),
+    ...action.why === void 0 ? {} : { why: braceSafe(action.why) },
+    ...action.adjustment === void 0 ? {} : { adjustment: braceSafe(action.adjustment) },
+    ...action.result === void 0 ? {} : { result: braceSafe(action.result) }
+  }));
+}
+function braceSafeStatements(statements) {
+  return (statements ?? []).map((statement) => ({ ...statement, text: braceSafe(statement.text) }));
+}
+function braceSafeEmotions(emotions) {
+  return (emotions ?? []).map((emotion) => ({
+    ...emotion,
+    who: braceSafe(emotion.who),
+    emotion: braceSafe(emotion.emotion),
+    ...emotion.evidence === void 0 ? {} : { evidence: braceSafe(emotion.evidence) }
+  }));
+}
+function braceSafeOutcome(outcome) {
+  return {
+    ...outcome,
+    summary: braceSafe(outcome.summary),
+    ...outcome.artifacts === void 0 ? {} : { artifacts: braceSafeList(outcome.artifacts) }
+  };
+}
+function braceSafeStructured(structured) {
+  return {
+    ...structured,
+    title: braceSafe(structured.title),
+    scene: braceSafeScene(structured.scene),
+    people: braceSafePeople(structured.people),
+    goals: braceSafeList(structured.goals),
+    actions: braceSafeActions(structured.actions),
+    statements: braceSafeStatements(structured.statements),
+    emotions: braceSafeEmotions(structured.emotions),
+    outcome: braceSafeOutcome(structured.outcome),
+    tags: braceSafeList(structured.tags),
+    keywords: braceSafeList(structured.keywords),
+    entities: braceSafeList(structured.entities),
+    lessons: braceSafeList(structured.lessons),
+    openQuestions: braceSafeList(structured.openQuestions)
+  };
+}
+function neutralizeEventRecord(record) {
+  const diary = braceSafe(record.diary);
+  const structured = braceSafeStructured(record.structured);
+  const diaryHash = sha256(diary);
+  const embedding = record.embedding === void 0 ? void 0 : { ...record.embedding, textHash: diaryHash };
+  return {
+    ...record,
+    structured,
+    diary,
+    diaryHash,
+    ...embedding === void 0 ? {} : { embedding }
+  };
+}
 function occurredMs(summary) {
   return parseIso(summary.occurredAt) ?? 0;
 }
@@ -2006,8 +2109,11 @@ function readDiary(paths, id) {
 }
 function writeEventPair(paths, record) {
   assertEventId(record.id);
+  const stored = neutralizeEventRecord(record);
   const expected = sha256(record.diary);
-  if (typeof record.diaryHash !== "string" || record.diaryHash !== expected) {
+  const consistentWithInput = record.diaryHash === expected;
+  const consistentWithStored = record.diaryHash === stored.diaryHash;
+  if (typeof record.diaryHash !== "string" || !(consistentWithInput || consistentWithStored)) {
     throw new Error(
       `diary hash mismatch for ${record.id}: expected ${expected}, got ${String(record.diaryHash)}`
     );
@@ -2016,9 +2122,9 @@ function writeEventPair(paths, record) {
   ensureDir(paths.eventsDir);
   const existed = fs5.existsSync(files.jsonFile) || fs5.existsSync(files.mdFile);
   const previousJson = fs5.existsSync(files.jsonFile) ? readTextFile(files.jsonFile) : void 0;
-  writeJsonFile(files.jsonFile, record);
+  writeJsonFile(files.jsonFile, stored);
   try {
-    writeTextFileAtomic(files.mdFile, mdTextFor(record.diary));
+    writeTextFileAtomic(files.mdFile, mdTextFor(stored.diary));
   } catch (error) {
     if (previousJson !== void 0) {
       writeTextFileAtomic(files.jsonFile, previousJson);
@@ -2028,7 +2134,7 @@ function writeEventPair(paths, record) {
     throw error;
   }
   try {
-    updateIndexWith(paths, record);
+    updateIndexWith(paths, stored);
   } catch {
   }
   return { jsonFile: files.jsonFile, mdFile: files.mdFile, created: !existed };
@@ -2097,13 +2203,13 @@ function hashFragment(contentHash) {
 function buildRecord(encoded, options) {
   assertEventId(options.id);
   const now = options.now ?? nowIso();
-  const diary = normalizeDiary(encoded.diary);
+  const diary = braceSafe(normalizeDiary(encoded.diary));
   return {
     schemaVersion: SCHEMA_VERSION,
     id: options.id,
     createdAt: now,
     updatedAt: now,
-    structured: encoded.structured,
+    structured: braceSafeStructured(encoded.structured),
     diary,
     diaryHash: sha256(diary),
     revision: options.revision ?? 1
