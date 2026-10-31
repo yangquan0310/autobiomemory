@@ -2404,11 +2404,20 @@ function isCoolingDown(state, cooldownMs, nowMs = Date.now()) {
   if (Number.isNaN(last)) return false;
   return nowMs - last < cooldownMs;
 }
-function pendingFailures(state, nowMs = Date.now()) {
+function dueFailures(state, nowMs = Date.now()) {
   return Object.values(state.failures).filter((entry) => {
     const due = Date.parse(entry.nextAttemptAt);
     return Number.isNaN(due) || due <= nowMs;
   }).sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt));
+}
+function notYetDueFailures(state, nowMs = Date.now()) {
+  return Object.values(state.failures).filter((entry) => {
+    const due = Date.parse(entry.nextAttemptAt);
+    return !Number.isNaN(due) && due > nowMs;
+  }).sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt));
+}
+function pendingFailures(state, nowMs = Date.now()) {
+  return dueFailures(state, nowMs);
 }
 
 // src/units.ts
@@ -2889,7 +2898,14 @@ async function consolidate(input) {
   const cursorState = loadCursor(paths);
   const spanState = loadSpans(paths);
   const store = input.dryRun ? void 0 : new VectorStore(paths.vectorDb);
-  const failedTargets = new Set(pendingFailures(runState).map((entry) => entry.target));
+  const backingOff = new Map(
+    notYetDueFailures(runState).filter((entry) => entry.kind === "consolidate").map((entry) => [entry.target, entry])
+  );
+  const leaveBackoff = (target) => {
+    if (runState.failures[failureKey("consolidate", target)] === void 0) return;
+    clearFailure(runState, "consolidate", target);
+    if (!input.dryRun) saveRunState(paths, runState);
+  };
   const attemptedEmbed = /* @__PURE__ */ new Set();
   let budget = Math.max(1, config.consolidation.maxEventsPerRun);
   let caughtUpSessions = 0;
@@ -2901,21 +2917,29 @@ async function consolidate(input) {
       }
       if (budget <= 0) break;
       result.sessionsScanned += 1;
-      if (failedTargets.has(file) && !input.force) {
-        result.details.push(`\u8DF3\u8FC7\uFF08\u5931\u8D25\u9000\u907F\u4E2D\uFF09\uFF1A${sessionLabel(file)}`);
+      const backoff = backingOff.get(file);
+      if (backoff !== void 0 && !input.force) {
+        result.details.push(
+          `\u8DF3\u8FC7\uFF08\u5931\u8D25\u9000\u907F\u4E2D\uFF0C${backoff.nextAttemptAt} \u91CD\u8BD5\uFF09\uFF1A${sessionLabel(file)}`
+        );
         continue;
       }
+      let failedThisSession = false;
       let transcript;
       try {
         transcript = readTranscript(file);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         recordFailure(runState, "consolidate", file, error);
+        failedThisSession = true;
         result.eventsFailed += 1;
         result.details.push(`\u8BFB\u53D6\u5931\u8D25\uFF1A${sessionLabel(file)} \u2014 ${message}`);
         continue;
       }
-      if (transcript.records.length === 0) continue;
+      if (transcript.records.length === 0) {
+        leaveBackoff(file);
+        continue;
+      }
       let previous = getSessionCursor(cursorState, transcript.sessionFile);
       if (previous && transcript.fileSize < previous.fileSize) {
         result.details.push(`\u68C0\u6D4B\u5230\u4F1A\u8BDD\u88AB\u91CD\u5199\uFF0C\u6E38\u6807\u91CD\u7F6E\uFF1A${sessionLabel(file)}`);
@@ -2924,6 +2948,7 @@ async function consolidate(input) {
       const pending = pendingRecords(transcript, previous);
       if (pending.length === 0) {
         caughtUpSessions += 1;
+        leaveBackoff(file);
         continue;
       }
       const known = knownSpanHashes(spanState, transcript.sessionFile);
@@ -2966,6 +2991,7 @@ async function consolidate(input) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const failure = recordFailure(runState, "consolidate", file, error);
+          failedThisSession = true;
           result.eventsFailed += 1;
           result.details.push(`\u7F16\u7801\u5931\u8D25\uFF1A${summarizeUnit(unit)} \u2014 ${message}`);
           const maxAttempts = Math.max(1, config.consolidation.maxSpanAttempts);
@@ -3009,6 +3035,7 @@ async function consolidate(input) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           recordFailure(runState, "store", eventId, error);
+          failedThisSession = true;
           result.eventsFailed += 1;
           result.details.push(`\u5B58\u50A8\u5931\u8D25\uFF1A${eventId} \u2014 ${message}`);
           saveRunState(paths, runState);
@@ -3041,8 +3068,8 @@ async function consolidate(input) {
         putSessionCursor(cursorState, cursorFor(transcript, unit, previous));
         saveCursor(paths, cursorState);
         saveSpans(paths, spanState);
-        saveRunState(paths, runState);
         clearFailure(runState, "consolidate", file);
+        saveRunState(paths, runState);
       }
       if (units.length === 0 && pending.length > options.tailRecords) {
         const lastConsumed = pending[pending.length - 1 - options.tailRecords];
@@ -3061,6 +3088,7 @@ async function consolidate(input) {
           saveCursor(paths, cursorState);
         }
       }
+      if (!failedThisSession) leaveBackoff(file);
     }
     if (store && embedder && !input.signal?.aborted) {
       const summaries = listEventSummaries(paths, { refresh: true });
@@ -4049,6 +4077,7 @@ export {
   decodeZstdFrames,
   plugin_default as default,
   defaultConfig,
+  dueFailures,
   embedOne,
   embeddingEndpoint,
   encodeUnit,
@@ -4076,6 +4105,7 @@ export {
   name,
   normalizeEncodedEvent,
   normalizeRecords,
+  notYetDueFailures,
   parseDotEnv,
   parseEncodingResponse,
   parseFilterArguments,

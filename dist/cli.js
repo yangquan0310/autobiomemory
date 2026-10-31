@@ -2338,10 +2338,16 @@ function isCoolingDown(state, cooldownMs, nowMs = Date.now()) {
   if (Number.isNaN(last)) return false;
   return nowMs - last < cooldownMs;
 }
-function pendingFailures(state, nowMs = Date.now()) {
+function dueFailures(state, nowMs = Date.now()) {
   return Object.values(state.failures).filter((entry) => {
     const due = Date.parse(entry.nextAttemptAt);
     return Number.isNaN(due) || due <= nowMs;
+  }).sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt));
+}
+function notYetDueFailures(state, nowMs = Date.now()) {
+  return Object.values(state.failures).filter((entry) => {
+    const due = Date.parse(entry.nextAttemptAt);
+    return !Number.isNaN(due) && due > nowMs;
   }).sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt));
 }
 
@@ -2774,7 +2780,14 @@ async function consolidate(input) {
   const cursorState = loadCursor(paths);
   const spanState = loadSpans(paths);
   const store = input.dryRun ? void 0 : new VectorStore(paths.vectorDb);
-  const failedTargets = new Set(pendingFailures(runState).map((entry) => entry.target));
+  const backingOff = new Map(
+    notYetDueFailures(runState).filter((entry) => entry.kind === "consolidate").map((entry) => [entry.target, entry])
+  );
+  const leaveBackoff = (target) => {
+    if (runState.failures[failureKey("consolidate", target)] === void 0) return;
+    clearFailure(runState, "consolidate", target);
+    if (!input.dryRun) saveRunState(paths, runState);
+  };
   const attemptedEmbed = /* @__PURE__ */ new Set();
   let budget = Math.max(1, config.consolidation.maxEventsPerRun);
   let caughtUpSessions = 0;
@@ -2786,21 +2799,29 @@ async function consolidate(input) {
       }
       if (budget <= 0) break;
       result.sessionsScanned += 1;
-      if (failedTargets.has(file) && !input.force) {
-        result.details.push(`\u8DF3\u8FC7\uFF08\u5931\u8D25\u9000\u907F\u4E2D\uFF09\uFF1A${sessionLabel(file)}`);
+      const backoff = backingOff.get(file);
+      if (backoff !== void 0 && !input.force) {
+        result.details.push(
+          `\u8DF3\u8FC7\uFF08\u5931\u8D25\u9000\u907F\u4E2D\uFF0C${backoff.nextAttemptAt} \u91CD\u8BD5\uFF09\uFF1A${sessionLabel(file)}`
+        );
         continue;
       }
+      let failedThisSession = false;
       let transcript;
       try {
         transcript = readTranscript(file);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         recordFailure(runState, "consolidate", file, error);
+        failedThisSession = true;
         result.eventsFailed += 1;
         result.details.push(`\u8BFB\u53D6\u5931\u8D25\uFF1A${sessionLabel(file)} \u2014 ${message}`);
         continue;
       }
-      if (transcript.records.length === 0) continue;
+      if (transcript.records.length === 0) {
+        leaveBackoff(file);
+        continue;
+      }
       let previous = getSessionCursor(cursorState, transcript.sessionFile);
       if (previous && transcript.fileSize < previous.fileSize) {
         result.details.push(`\u68C0\u6D4B\u5230\u4F1A\u8BDD\u88AB\u91CD\u5199\uFF0C\u6E38\u6807\u91CD\u7F6E\uFF1A${sessionLabel(file)}`);
@@ -2809,6 +2830,7 @@ async function consolidate(input) {
       const pending = pendingRecords(transcript, previous);
       if (pending.length === 0) {
         caughtUpSessions += 1;
+        leaveBackoff(file);
         continue;
       }
       const known = knownSpanHashes(spanState, transcript.sessionFile);
@@ -2851,6 +2873,7 @@ async function consolidate(input) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           const failure = recordFailure(runState, "consolidate", file, error);
+          failedThisSession = true;
           result.eventsFailed += 1;
           result.details.push(`\u7F16\u7801\u5931\u8D25\uFF1A${summarizeUnit(unit)} \u2014 ${message}`);
           const maxAttempts = Math.max(1, config.consolidation.maxSpanAttempts);
@@ -2894,6 +2917,7 @@ async function consolidate(input) {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           recordFailure(runState, "store", eventId, error);
+          failedThisSession = true;
           result.eventsFailed += 1;
           result.details.push(`\u5B58\u50A8\u5931\u8D25\uFF1A${eventId} \u2014 ${message}`);
           saveRunState(paths, runState);
@@ -2926,8 +2950,8 @@ async function consolidate(input) {
         putSessionCursor(cursorState, cursorFor(transcript, unit, previous));
         saveCursor(paths, cursorState);
         saveSpans(paths, spanState);
-        saveRunState(paths, runState);
         clearFailure(runState, "consolidate", file);
+        saveRunState(paths, runState);
       }
       if (units.length === 0 && pending.length > options.tailRecords) {
         const lastConsumed = pending[pending.length - 1 - options.tailRecords];
@@ -2946,6 +2970,7 @@ async function consolidate(input) {
           saveCursor(paths, cursorState);
         }
       }
+      if (!failedThisSession) leaveBackoff(file);
     }
     if (store && embedder && !input.signal?.aborted) {
       const summaries = listEventSummaries(paths, { refresh: true });
@@ -3727,7 +3752,9 @@ ${problems.map((p) => `  - ${p}`).join("\n")}
         })),
         lastRunAt: run.lastRunAt ?? null,
         totals: run.totals,
-        failures: Object.values(run.failures),
+        failures: Object.values(run.failures).sort(
+          (a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt)
+        ),
         skipped: Object.values(run.skipped ?? {}),
         config: {
           sessions: expandSessionDirs(config, process.cwd()),
@@ -3754,7 +3781,7 @@ ${problems.map((p) => `  - ${p}`).join("\n")}
           `\u4F1A\u8BDD\u6E38\u6807\u3000\u3000 \uFF1A${payload.sessions.length} \u4E2A`,
           `\u4E0A\u6B21\u6574\u7406\u3000\u3000 \uFF1A${payload.lastRunAt ?? "\u4ECE\u672A"}`,
           `\u7D2F\u8BA1         \uFF1A\u4E8B\u4EF6 ${run.totals.events} \xB7 \u5411\u91CF ${run.totals.embedded} \xB7 \u8FD0\u884C ${run.totals.runs}`,
-          payload.failures.length > 0 ? `\u5931\u8D25\u961F\u5217     \uFF1A${payload.failures.length} \u6761\uFF08\u4E0B\u6B21\u91CD\u8BD5\u6700\u65E9 ${payload.failures[0]?.nextAttemptAt}\uFF09` : "\u5931\u8D25\u961F\u5217     \uFF1A\u7A7A",
+          payload.failures.length > 0 ? `\u5931\u8D25\u961F\u5217     \uFF1A${payload.failures.length} \u6761\uFF08\u5DF2\u5230\u671F ${dueFailures(run).length} \u6761\uFF0C\u4E0B\u6B21\u91CD\u8BD5 ${payload.failures[0]?.nextAttemptAt}\uFF09` : "\u5931\u8D25\u961F\u5217     \uFF1A\u7A7A",
           payload.skipped.length > 0 ? `\u5DF2\u653E\u5F03\u7247\u6BB5   \uFF1A${payload.skipped.length} \u6761\uFF08consolidate --retry-skipped \u53EF\u91CD\u8BD5\uFF09` : "\u5DF2\u653E\u5F03\u7247\u6BB5   \uFF1A\u65E0",
           "",
           ...payload.sessions.map(

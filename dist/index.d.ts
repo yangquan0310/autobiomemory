@@ -645,7 +645,27 @@ declare function recordFailure(state: RunState, kind: FailureEntry['kind'], targ
 declare function clearFailure(state: RunState, kind: FailureEntry['kind'], target: string): void;
 /** True while the last run is inside the cooldown window. */
 declare function isCoolingDown(state: RunState, cooldownMs: number, nowMs?: number): boolean;
-/** Failures whose backoff has elapsed, oldest first. */
+/**
+ * Failures whose backoff has **elapsed**: they are due and must be retried by this run.
+ *
+ * A `nextAttemptAt` that cannot be parsed counts as due, so one corrupt timestamp can never
+ * wedge a session into permanent backoff.
+ */
+declare function dueFailures(state: RunState, nowMs?: number): FailureEntry[];
+/**
+ * Failures still inside their backoff window: this run must **leave them alone** because their
+ * `nextAttemptAt` is in the future.
+ *
+ * This is the set a caller uses to *skip* work; its complement ({@link dueFailures}) is the set a
+ * caller uses to *do* work. Treating the due set as a skip list is exactly the inversion that made
+ * every expired failure retry forever-never.
+ */
+declare function notYetDueFailures(state: RunState, nowMs?: number): FailureEntry[];
+/**
+ * @deprecated Ambiguous: "pending" reads like "outstanding, therefore skip it", which is the
+ * opposite of this function's meaning. Use {@link dueFailures} to decide what to retry and
+ * {@link notYetDueFailures} to decide what to skip.
+ */
 declare function pendingFailures(state: RunState, nowMs?: number): FailureEntry[];
 
 /**
@@ -1158,4 +1178,4 @@ interface LoggerOptions {
 declare function createLogger(options?: LoggerOptions): Logger;
 declare function silentLogger(): Logger;
 
-export { Config, type ConsolidateDeps, type ConsolidationConfig, type ConsolidationResult, type CursorState, DIRS, type DashscopeConfig, DashscopeError, DeepseekClient, type DeepseekConfig, DeepseekError, type Distiller, ENCODING_GUIDE, type Embedder, type EncodedEvent, EncodingError, type EventAction, type EventEmbeddingBookkeeping, type EventEmotion, type EventOutcome, type EventPerson, type EventRecord, type EventScene, type EventSourceRef, type EventStatement, type EventStatus, type EventSummary, type EventUnit, FILES, type FailureEntry, type LogLevel, type Logger, type LoggerOptions, type MemoryConfig, type MemoryPaths, type PluginConfig, RESPONSE_CONTRACT, type RawRecord, type RawRecordKind, type RecallFilters, type RecallHit, type RecallQuery, type RecallResult, type RerankHit, type Reranker, type RetrievalConfig, type RunState, SCHEMA_VERSION, STATE_VERSION, type SecretSource, type SessionCursor, type SessionSourceConfig, type SessionTranscript, type SkippedSpan, type StatementKind, type StructuredEvent, type TriggerConfig, type VectorHit, type VectorRow, type VectorSource, VectorStore, apply, blobToVector, buildEncodingRequest, buildRecord, buildSystemPrompt, buildUnits, clearFailure, consolidate, consolidateOnce, cosineSimilarity, createDistiller, createEmbedder, createLogger, createReranker, decodeZstdFrames, _default as default, defaultConfig, embedOne, embeddingEndpoint, encodeUnit, ensureConfig, ensureDataLayout, escapePromptBraces, eventIdFor, eventIndexPath, eventPair, expandSessionDirs, failureKey, getSessionCursor, inject, isConsolidating, isCoolingDown, listEventSummaries, listSessionFiles, loadConfig, loadCursor, loadRunState, matchFilters, memoryPaths, mergeConfig, missingEventIds, name, normalizeEncodedEvent, normalizeRecords, parseDotEnv, parseEncodingResponse, parseFilterArguments, pendingFailures, pendingRecords, putSessionCursor, readDiary, readEvent, readSecrets, readTranscript, recall, recordFailure, renderRecallText, renderRecords, renderUnitRecords, repairPairs, requireSecret, rerankEndpoint, resolveDataRoot, retrySkippedSpans, saveCursor, saveRunState, searchVectors, sessionIdFromPath, shortTermMemory, silentLogger, spanHash, staleEventIds, unitOptionsFromConfig, validateConfig, vectorNorm, vectorToBlob, writeConfig, writeEnvFile, writeEventPair };
+export { Config, type ConsolidateDeps, type ConsolidationConfig, type ConsolidationResult, type CursorState, DIRS, type DashscopeConfig, DashscopeError, DeepseekClient, type DeepseekConfig, DeepseekError, type Distiller, ENCODING_GUIDE, type Embedder, type EncodedEvent, EncodingError, type EventAction, type EventEmbeddingBookkeeping, type EventEmotion, type EventOutcome, type EventPerson, type EventRecord, type EventScene, type EventSourceRef, type EventStatement, type EventStatus, type EventSummary, type EventUnit, FILES, type FailureEntry, type LogLevel, type Logger, type LoggerOptions, type MemoryConfig, type MemoryPaths, type PluginConfig, RESPONSE_CONTRACT, type RawRecord, type RawRecordKind, type RecallFilters, type RecallHit, type RecallQuery, type RecallResult, type RerankHit, type Reranker, type RetrievalConfig, type RunState, SCHEMA_VERSION, STATE_VERSION, type SecretSource, type SessionCursor, type SessionSourceConfig, type SessionTranscript, type SkippedSpan, type StatementKind, type StructuredEvent, type TriggerConfig, type VectorHit, type VectorRow, type VectorSource, VectorStore, apply, blobToVector, buildEncodingRequest, buildRecord, buildSystemPrompt, buildUnits, clearFailure, consolidate, consolidateOnce, cosineSimilarity, createDistiller, createEmbedder, createLogger, createReranker, decodeZstdFrames, _default as default, defaultConfig, dueFailures, embedOne, embeddingEndpoint, encodeUnit, ensureConfig, ensureDataLayout, escapePromptBraces, eventIdFor, eventIndexPath, eventPair, expandSessionDirs, failureKey, getSessionCursor, inject, isConsolidating, isCoolingDown, listEventSummaries, listSessionFiles, loadConfig, loadCursor, loadRunState, matchFilters, memoryPaths, mergeConfig, missingEventIds, name, normalizeEncodedEvent, normalizeRecords, notYetDueFailures, parseDotEnv, parseEncodingResponse, parseFilterArguments, pendingFailures, pendingRecords, putSessionCursor, readDiary, readEvent, readSecrets, readTranscript, recall, recordFailure, renderRecallText, renderRecords, renderUnitRecords, repairPairs, requireSecret, rerankEndpoint, resolveDataRoot, retrySkippedSpans, saveCursor, saveRunState, searchVectors, sessionIdFromPath, shortTermMemory, silentLogger, spanHash, staleEventIds, unitOptionsFromConfig, validateConfig, vectorNorm, vectorToBlob, writeConfig, writeEnvFile, writeEventPair };
