@@ -129,11 +129,22 @@ export function failureKey(kind: FailureEntry['kind'], target: string): string
 export function recordFailure(state: RunState, kind: FailureEntry['kind'], target: string, error: unknown, options?: { retryDelayMs?: number }): FailureEntry
 export function clearFailure(state: RunState, kind: FailureEntry['kind'], target: string): void
 export function isCoolingDown(state: RunState, cooldownMs: number, nowMs?: number): boolean
+/** Failures whose backoff has elapsed — retry these now. */
+export function dueFailures(state: RunState, nowMs?: number): FailureEntry[]
+/** Failures still inside their backoff window — leave these alone. */
+export function notYetDueFailures(state: RunState, nowMs?: number): FailureEntry[]
+/** @deprecated Alias of dueFailures(); the name is ambiguous. */
 export function pendingFailures(state: RunState, nowMs?: number): FailureEntry[]
 ```
 
 Cursor map is keyed by absolute session file path. `recordFailure` increments `attempts` and sets
 `nextAttemptAt` with exponential backoff (base `retryDelayMs ?? 30_000`, capped at 30 min).
+
+`dueFailures` and `notYetDueFailures` are exact complements, and callers must pick by intent:
+`notYetDueFailures` is what a run **skips**, `dueFailures` is what a run **processes**. Using the
+due set as a skip list is what once deadlocked retries (a due entry was skipped forever because
+skipping never advanced `nextAttemptAt`). An unparsable `nextAttemptAt` counts as due so a corrupt
+timestamp cannot wedge a session either.
 
 ## src/session-reader.ts — raw transcripts, read in place
 
