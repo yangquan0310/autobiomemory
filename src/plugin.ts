@@ -37,7 +37,7 @@ import {
   shortTermMemory,
 } from './store.js'
 import { VectorStore } from './vectors.js'
-import { maskSecret, truncate } from './util.js'
+import { maskSecret, neutralizeTemplateBraces, truncate } from './util.js'
 import type {
   EventStatus,
   Logger,
@@ -52,38 +52,26 @@ export const name = 'autobiomemory'
 /** Services this plugin needs; it stays unloaded in profiles that lack them. */
 export const inject = ['tools', 'systemPrompt']
 
-/** Zero-width space (U+200B): invisible to the model and to a human reader. */
-const ZWSP = '\u200b'
-
 /**
  * Defuse `{{…}}` before diary text is handed to the harness.
  *
  * `ctx.systemPrompt.section()` text is not literal prose from the harness's point of view: the
  * system-prompt service interpolates every `{{name}}` group it finds and *throws* when the name is
  * not a registered variable (`unknown prompt variable "{{variable}}" in section "…"`), which fails
- * the whole prompt assembly. Diary bodies are DeepSeek's transcription of raw transcripts, so they
- * legitimately contain literal `{{…}}` — for example when the agent explained prompt variables to
- * the user. A zero-width space between the two braces keeps the text verbatim for readers
- * (human and model) while making the interpolator's `{{` scan fail to match.
+ * the whole prompt assembly — and a *registered* name is worse, because `{{model}}` / `{{cwd}}` are
+ * silently replaced by their values, rewriting the agent's own memory on the way into the prompt.
  *
- * Only the *memory → prompt* boundary escapes. Stored events (`events/*.json`, `events/*.md`) stay
- * byte-identical to what was encoded, so `diaryHash` and the vector index are unaffected.
+ * Storage already neutralises braces on the way to disk (see `neutralizeTemplateBraces` in
+ * `util.ts` and `buildRecord` in `store.ts`), so this is the second, independent guard: the
+ * *memory → prompt* boundary. It stays deliberately redundant — a hand-edited event file, a legacy
+ * record written by an older version, or any future writer that bypasses `store.ts` would otherwise
+ * be able to poison prompt assembly again.
  *
  * @param text - prompt-bound text that may contain literal braces.
  * @returns the same text with every run of adjacent `{`/`}` separated; idempotent.
  */
 export function escapePromptBraces(text: string): string {
-  // Fast path: nothing the interpolator could match.
-  if (!text.includes('{{') && !text.includes('}}')) return text
-  const out: string[] = []
-  for (let i = 0; i < text.length; i += 1) {
-    const char = text.charAt(i)
-    out.push(char)
-    // Separate every adjacent identical brace, not just the first pair of a run: `{{{` must not
-    // leave a recognisable `{{` behind.
-    if ((char === '{' || char === '}') && text.charAt(i + 1) === char) out.push(ZWSP)
-  }
-  return out.join('')
+  return neutralizeTemplateBraces(text)
 }
 
 export interface PluginConfig {
