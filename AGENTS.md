@@ -96,7 +96,7 @@ git checkout alpha && git merge --no-ff feat/core feat/session ...
 git checkout beta && pnpm run check && pnpm run build && pnpm run pack:dist
 
 # 从 dist 安装插件（<version> 取 package.json 的 version）
-dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-<version>.tgz"
+dsh plugin --profile web add "file:$PWD/dist/autobiomemory-<version>.tgz"
 ```
 
 安装后**必须重启 profile 进程**（`dsh web`）才会加载新的 bundle 层。
@@ -114,7 +114,7 @@ dsh plugin --profile web add "file:$PWD/dist/deepseek-harness-autobiomemory-<ver
 5. **发布**：打 tag `vX.Y.Z`，推送所有相关分支与 tag，创建 GitHub Release 并把 `dist/*.tgz` 作为资产上传。
 6. **从产物验证一次**（唯一可信的验收）：下载 Release 里的 tgz →
    `dsh plugin --profile <临时profile> add "file:<tgz>"` →
-   确认 `dsh.profile.bundles` 里出现 `deepseek-harness-autobiomemory` →
+   确认 `dsh.profile.bundles` 里出现 `autobiomemory` →
    `--dump-config` 能看到该层。
 
 打包两条硬约束，缺一条 dsh 就装不对：

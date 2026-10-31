@@ -107,7 +107,7 @@
     ],
     "outcome": { "status": "partial", "summary": "…", "artifacts": ["dist/…tgz"] },
     "tags": ["插件", "部署"], "keywords": ["dsh plugin add", "bundle"],
-    "entities": ["deepseek-harness-autobiomemory"],
+    "entities": ["autobiomemory"],
     "lessons": ["安装后必须重启 profile 才加载新 bundle 层"],
     "openQuestions": ["重启窗口期由谁负责"],
     "sources": [{ "sessionId": "…", "sessionFile": "/home/ubuntu/.dsh/sessions/…/session.v4.jsonl.zstd",
