@@ -3,6 +3,40 @@
 All notable changes to AutoBioMemory. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versions follow the package version.
 
+## [0.1.3] — 2026-10-31
+
+### Fixed
+
+- **A diary that merely mentions `{{…}}` no longer breaks system-prompt assembly.** dsh renders a
+  prompt section's text as a *template*: it interpolates every `{{name}}` group it finds, and an
+  unregistered name aborts the whole assembly with
+  `unknown prompt variable "{{variable}}" in section "autobiomemory:short-term"` — so one bad diary
+  took down every prompt in the profile, not just the memory digest. Diary bodies are DeepSeek's
+  transcription of raw transcripts, which is arbitrary prose: writing the literal string
+  `{{variable}}` while explaining prompt variables is enough to poison it. A registered name was
+  worse than a crash: `{{model}}` / `{{cwd}}` were silently replaced by their values, rewriting the
+  agent's own memory on the way into the prompt.
+  The fix is a single escape at the *memory → prompt* boundary: `escapePromptBraces()` inserts a
+  zero-width space (U+200B) between adjacent braces, so the interpolator's `{{` scan no longer
+  matches while the text reads identically to a human and to the model. It is applied to the
+  composed section text, covering diary bodies, event titles, tool names and any future
+  structured-field rendering. The escape is idempotent and only ever adds zero-width spaces.
+- **Stored memories are deliberately untouched.** `events/<id>.json` and `events/<id>.md` stay
+  byte-identical, so `diaryHash`, JSON/MD pair validation and vector freshness keep working; the
+  escaping happens only on the way into the prompt, never on the way to disk.
+- **The short-term digest no longer renders `undefined` as the tool name** when the plugin is
+  applied without schema validation. The recall and consolidate tool names are now resolved once,
+  from the same defaults the schema declares.
+
+### Tests
+
+- New `tests/prompt-escape.test.ts` (9 tests, 163 → 172) pins the invariant end to end: an event
+  whose diary contains `{{model}}`, `{{cwd}}` and an unregistered `{{variable}}` still assembles
+  through dsh's real `renderPrompt` without throwing; no recognisable `{{…}}` survives in the
+  section; registered variables are not substituted into the diary; stripping the inserted
+  zero-width spaces restores the raw text verbatim; and the files on disk are unchanged. The pure
+  function is covered separately, including idempotency and runs such as `{{{`.
+
 ## [0.1.2] — 2026-10-30
 
 ### Fixed
