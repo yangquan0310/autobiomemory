@@ -3,6 +3,46 @@
 All notable changes to AutoBioMemory. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/), versions follow the package version.
 
+## [0.2.1] — 2026-10-31
+
+### Fixed
+
+- **Failed sessions are retried again when their backoff expires.** The write path asked
+  `state/status.json` for the failures whose `nextAttemptAt` had **passed** — the set that is due for
+  a retry — and then used it as the list of sessions to *skip*. The semantics were inverted in one
+  line, so a session was skipped from the exact moment it became eligible again: a skip never
+  advances `nextAttemptAt`, so the entry stayed in the skip list forever, `attempts` was frozen at
+  `1`, and the only way to make progress was `consolidate --force` (which bypasses the check). The
+  skip list is now built from the complement (`notYetDueFailures()`); a due failure goes straight
+  through the normal read → segment → encode path like any other session.
+- **The poison-span safety net works again.** `consolidation.maxSpanAttempts` can only fire if a
+  failing session is actually retried, which the inversion prevented: `attempts` never grew, so
+  `recordSkipped` never ran and one unencodable fragment blocked its session's cursor indefinitely.
+  A session that keeps failing is now given up on — span recorded, cursor advanced — after
+  `maxSpanAttempts` ordinary runs.
+- **A retried session that gets through leaves the failure queue.** Previously the entry (and its
+  stale `attempts`) lingered even after healthy runs, so a later failure could hit the give-up
+  threshold early. `attempts` now counts consecutive failures only, and a session that is simply
+  caught up or empty also clears its entry.
+
+**No `--force` needed.** An install whose queue contains expired failures heals itself on the next
+ordinary run (automatic consolidation or `autobiomemory consolidate`): the sessions are attempted,
+and on a repeated failure `attempts` increments until the poison span is given up on. `--force`
+remains an operator override that ignores the backoff window.
+
+`autobiomemory status` now shows how many queued failures are already due, and `state.ts` gained
+`dueFailures()` / `notYetDueFailures()` (exact complements, named by intent); `pendingFailures()` is
+kept as a deprecated alias of `dueFailures()`.
+
+### Tests
+
+- New `tests/consolidate-retry.test.ts` (7 tests, 172 → 179), all offline and all without `force`:
+  an expired failure is retried (the distiller is called again and `attempts` goes 1 → 2), a
+  successful retry clears the queue and advances the cursor, a poison span is given up on after
+  `maxSpanAttempts` plain runs and the session keeps flowing, a not-yet-due failure is skipped (with
+  `--force` still overriding), and the due/not-due split partitions the queue. Restoring the old
+  inversion fails 4 of them.
+
 ## [0.2.0] — 2026-10-31
 
 ### Breaking
