@@ -30,7 +30,7 @@ import {
   repairPairs,
   shortTermMemory,
 } from './store.js'
-import { loadCursor, loadRunState } from './state.js'
+import { dueFailures, loadCursor, loadRunState } from './state.js'
 import { VectorStore, staleEventIds, missingEventIds, vectorNorm } from './vectors.js'
 import { maskSecret, nowIso, sha256, truncate } from './util.js'
 import { validateConfig, mergeConfig } from './config.js'
@@ -278,7 +278,9 @@ async function main(): Promise<number> {
         })),
         lastRunAt: run.lastRunAt ?? null,
         totals: run.totals,
-        failures: Object.values(run.failures),
+        failures: Object.values(run.failures).sort(
+          (a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt),
+        ),
         skipped: Object.values(run.skipped ?? {}),
         config: {
           sessions: expandSessionDirs(config, process.cwd()),
@@ -305,7 +307,8 @@ async function main(): Promise<number> {
           `上次整理　　 ：${payload.lastRunAt ?? '从未'}`,
           `累计         ：事件 ${run.totals.events} · 向量 ${run.totals.embedded} · 运行 ${run.totals.runs}`,
           payload.failures.length > 0
-            ? `失败队列     ：${payload.failures.length} 条（下次重试最早 ${payload.failures[0]?.nextAttemptAt}）`
+            ? `失败队列     ：${payload.failures.length} 条（已到期 ${dueFailures(run).length} 条，` +
+              `下次重试 ${payload.failures[0]?.nextAttemptAt}）`
             : '失败队列     ：空',
           payload.skipped.length > 0
             ? `已放弃片段   ：${payload.skipped.length} 条（consolidate --retry-skipped 可重试）`
