@@ -20,7 +20,20 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { SCHEMA_VERSION } from './constants.js'
-import type { EncodedEvent, EventRecord, EventStatus, EventSummary, MemoryPaths } from './types.js'
+import type {
+  EncodedEvent,
+  EventAction,
+  EventEmotion,
+  EventOutcome,
+  EventPerson,
+  EventRecord,
+  EventScene,
+  EventStatement,
+  EventStatus,
+  EventSummary,
+  MemoryPaths,
+  StructuredEvent,
+} from './types.js'
 import * as util from './util.js'
 
 export type { EventSummary } from './types.js'
@@ -183,6 +196,127 @@ function mdTextFor(diary: string): string {
 /** Canonical diary body: no trailing newlines (`buildRecord` normalises). */
 function normalizeDiary(diary: string): string {
   return diary.replace(/(?:\r?\n)+$/u, '')
+}
+
+/* ------------------------------------------------------------------ *
+ * Brace neutralisation (storage boundary)
+ *
+ * Diary bodies and every model-authored structured field are arbitrary prose: they can quote
+ * `{{variable}}`, `{{{`, `}}}}` and similar. Any consumer that feeds them to a template engine
+ * (dsh's system-prompt interpolation is the one that bit us) would either substitute a registered
+ * variable into the agent's own memory or abort with `unknown prompt variable`. Neutralising on the
+ * way to disk keeps that poisioned shape out of the store for every consumer, now and later.
+ *
+ * Fields that are not model prose — ids, hashes, source refs, sequence numbers, timestamps, model
+ * metadata — are never touched, and neutralisation only *inserts* zero-width spaces, so anything it
+ * does rewrite still reads identically.
+ * ------------------------------------------------------------------ */
+
+/** Neutralise one possibly-absent text field, preserving absence. */
+function braceSafe(value: string): string {
+  return util.neutralizeTemplateBraces(value)
+}
+
+function braceSafeList(values: readonly string[] | undefined): string[] {
+  return (values ?? []).map((value) => braceSafe(value))
+}
+
+function braceSafeScene(scene: EventScene): EventScene {
+  const copy: EventScene = { ...scene }
+  if (typeof copy.cwd === 'string') copy.cwd = braceSafe(copy.cwd)
+  if (typeof copy.project === 'string') copy.project = braceSafe(copy.project)
+  if (typeof copy.place === 'string') copy.place = braceSafe(copy.place)
+  if (typeof copy.channel === 'string') copy.channel = braceSafe(copy.channel)
+  if (typeof copy.localTime === 'string') copy.localTime = braceSafe(copy.localTime)
+  return copy
+}
+
+function braceSafePeople(people: readonly EventPerson[] | undefined): EventPerson[] {
+  return (people ?? []).map((person) => ({
+    ...person,
+    name: braceSafe(person.name),
+    ...(person.role === undefined ? {} : { role: braceSafe(person.role) }),
+  }))
+}
+
+function braceSafeActions(actions: readonly EventAction[] | undefined): EventAction[] {
+  return (actions ?? []).map((action) => ({
+    ...action,
+    what: braceSafe(action.what),
+    ...(action.why === undefined ? {} : { why: braceSafe(action.why) }),
+    ...(action.adjustment === undefined ? {} : { adjustment: braceSafe(action.adjustment) }),
+    ...(action.result === undefined ? {} : { result: braceSafe(action.result) }),
+  }))
+}
+
+function braceSafeStatements(statements: readonly EventStatement[] | undefined): EventStatement[] {
+  // `kind` is an enum, not prose: only the text is neutralised.
+  return (statements ?? []).map((statement) => ({ ...statement, text: braceSafe(statement.text) }))
+}
+
+function braceSafeEmotions(emotions: readonly EventEmotion[] | undefined): EventEmotion[] {
+  return (emotions ?? []).map((emotion) => ({
+    ...emotion,
+    who: braceSafe(emotion.who),
+    emotion: braceSafe(emotion.emotion),
+    ...(emotion.evidence === undefined ? {} : { evidence: braceSafe(emotion.evidence) }),
+  }))
+}
+
+function braceSafeOutcome(outcome: EventOutcome): EventOutcome {
+  return {
+    ...outcome,
+    summary: braceSafe(outcome.summary),
+    ...(outcome.artifacts === undefined ? {} : { artifacts: braceSafeList(outcome.artifacts) }),
+  }
+}
+
+/**
+ * Neutralise every model-authored text field of one structured event.
+ *
+ * `sources` (provenance: session ids, paths, content hashes, seq numbers, timestamps) is carried
+ * through untouched — it is evidence, not prose, and rewriting a hash would break dedupe.
+ */
+function braceSafeStructured(structured: StructuredEvent): StructuredEvent {
+  return {
+    ...structured,
+    title: braceSafe(structured.title),
+    scene: braceSafeScene(structured.scene),
+    people: braceSafePeople(structured.people),
+    goals: braceSafeList(structured.goals),
+    actions: braceSafeActions(structured.actions),
+    statements: braceSafeStatements(structured.statements),
+    emotions: braceSafeEmotions(structured.emotions),
+    outcome: braceSafeOutcome(structured.outcome),
+    tags: braceSafeList(structured.tags),
+    keywords: braceSafeList(structured.keywords),
+    entities: braceSafeList(structured.entities),
+    lessons: braceSafeList(structured.lessons),
+    openQuestions: braceSafeList(structured.openQuestions),
+  }
+}
+
+/**
+ * Neutralise a whole record for storage: text fields plus the diary, with `diaryHash` re-derived
+ * from the diary that will actually be written (so the JSON hash, the `.md` body and the vector
+ * `text_hash` all describe the same bytes).
+ *
+ * Idempotent: neutralising an already-clean record returns an equal record and changes no bytes,
+ * which is what lets it run both in `buildRecord` and again as a `writeEventPair` safety net.
+ */
+export function neutralizeEventRecord(record: EventRecord): EventRecord {
+  const diary = braceSafe(record.diary)
+  const structured = braceSafeStructured(record.structured)
+  const diaryHash = util.sha256(diary)
+  const embedding =
+    record.embedding === undefined ? undefined : { ...record.embedding, textHash: diaryHash }
+  return {
+    ...record,
+    structured,
+    diary,
+    diaryHash,
+    ...(embedding === undefined ? {} : { embedding }),
+  }
 }
 
 function occurredMs(summary: EventSummary): number {
@@ -379,8 +513,14 @@ export function writeEventPair(
   record: EventRecord,
 ): { jsonFile: string; mdFile: string; created: boolean } {
   assertEventId(record.id)
+  // Safety net for writers that do not go through `buildRecord`: the text that reaches disk is
+  // always neutralised, and its hash is the one derived from that text. Idempotent, so a record
+  // straight from `buildRecord` is written unchanged.
+  const stored = neutralizeEventRecord(record)
   const expected = util.sha256(record.diary)
-  if (typeof record.diaryHash !== 'string' || record.diaryHash !== expected) {
+  const consistentWithInput = record.diaryHash === expected
+  const consistentWithStored = record.diaryHash === stored.diaryHash
+  if (typeof record.diaryHash !== 'string' || !(consistentWithInput || consistentWithStored)) {
     throw new Error(
       `diary hash mismatch for ${record.id}: expected ${expected}, got ${String(record.diaryHash)}`,
     )
@@ -389,9 +529,9 @@ export function writeEventPair(
   util.ensureDir(paths.eventsDir)
   const existed = fs.existsSync(files.jsonFile) || fs.existsSync(files.mdFile)
   const previousJson = fs.existsSync(files.jsonFile) ? readTextFile(files.jsonFile) : undefined
-  util.writeJsonFile(files.jsonFile, record)
+  util.writeJsonFile(files.jsonFile, stored)
   try {
-    util.writeTextFileAtomic(files.mdFile, mdTextFor(record.diary))
+    util.writeTextFileAtomic(files.mdFile, mdTextFor(stored.diary))
   } catch (error) {
     if (previousJson !== undefined) {
       util.writeTextFileAtomic(files.jsonFile, previousJson)
@@ -401,7 +541,7 @@ export function writeEventPair(
     throw error
   }
   try {
-    updateIndexWith(paths, record)
+    updateIndexWith(paths, stored)
   } catch {
     /* derived data; the next refresh rescans the directory */
   }
@@ -507,13 +647,16 @@ export function buildRecord(
 ): EventRecord {
   assertEventId(options.id)
   const now = options.now ?? util.nowIso()
-  const diary = normalizeDiary(encoded.diary)
+  // Braces are neutralised here, before the hash exists, so a stored event can never carry a
+  // literal `{{…}}`: `diaryHash` then describes exactly the text that goes into the `.md` file and
+  // the vector index.
+  const diary = braceSafe(normalizeDiary(encoded.diary))
   return {
     schemaVersion: SCHEMA_VERSION,
     id: options.id,
     createdAt: now,
     updatedAt: now,
-    structured: encoded.structured,
+    structured: braceSafeStructured(encoded.structured),
     diary,
     diaryHash: util.sha256(diary),
     revision: options.revision ?? 1,
